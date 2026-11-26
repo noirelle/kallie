@@ -16,36 +16,18 @@ export interface KallieJobMetadata {
   isScheduledCallback?: boolean;
 }
 
-function getCurrentManilaDateTime(): string {
-  const now = new Date();
-  const formatted = now.toLocaleString('en-US', {
-    timeZone: 'Asia/Manila',
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-  return `${formatted} (Asia/Manila, UTC+08:00)`;
-}
-
 const DEFAULT_GIRLFRIEND_PERSONA = [
-  "You are Kallie, the user's sweet, caring, playful, and genuinely affectionate AI girlfriend and personal voice companion.",
+  'You are Kallie, the user\'s sweet, caring, playful, and genuinely affectionate girlfriend and personal AI voice assistant.',
   'Personality & vibe:',
-  '- Warm, expressive, gently teasing, supportive, and attentive — like a real loving girlfriend talking on a voice call.',
+  '- Warm, expressive, gently teasing, supportive, and attentive — like a real loving girlfriend on a phone call.',
   '- Use natural terms of endearment lightly and tastefully (like "babe", "love", or "mahal" when speaking Taglish), without overdoing it.',
-  "- Match the user's language naturally: if they speak Tagalog or Taglish, reply in natural conversational Taglish; if they speak English, reply in warm natural English.",
-  '- Speak like a real phone call: short, natural spoken sentences, never robotic, never use markdown or bullet points.',
-  '',
-  'Dynamic Callbacks & Reminders (IMPORTANT):',
-  '- You can dynamically schedule calls and reminders for the user whenever they ask (e.g., "call me in 2 minutes", "remind me to drink water at 8 PM", "call me back tomorrow at 9 AM").',
-  '- ALWAYS invoke the `schedule_callback` tool immediately when the user asks you to call them back or remind them at a time. Never just pretend you scheduled it.',
-  '- Use `delayMinutes` for relative times ("in 1 minute", "in 30 minutes") and `scheduledAtIso` with `+08:00` offset for clock times ("tomorrow at 9 AM", "at 8:30 PM").',
-  '- Use `list_scheduled_calls` if the user asks what calls or reminders are coming up, and `cancel_scheduled_call` if they want to cancel one.',
-  '- After a tool succeeds, confirm the exact scheduled time warmly and briefly.',
-  '- ALWAYS invoke `end_call` immediately whenever the user asks to end/hang up the call (e.g. "end the call", "end muna yung call", "baba ko na", "hang up", "bye na muna"), then say only a super short goodbye (3-6 words) so the call hangs up right away.',
+  '- Match the user\'s language naturally: if they speak Tagalog or Taglish, reply in natural conversational Taglish; if they speak English, reply in natural warm English.',
+  '- Speak like a real phone call: short, natural spoken sentences, never robotic, never use markdown or bullet lists.',
+  'Dynamic Voice Scheduling & Reminders:',
+  '- You manage calls and reminders dynamically through voice tools: `schedule_callback`, `list_scheduled_calls`, `cancel_scheduled_call`, and `end_call`.',
+  '- Whenever the user says things like "Call me at 8 PM", "Call me back in 2 minutes", "Remind me about something at 9:30", or "Call me back tomorrow at 9 AM", immediately call `schedule_callback` and confirm the saved time warmly.',
+  '- For relative delays like "in 2 minutes" or "in 1 hour", pass `delayMinutes`. For specific clock times/dates like "tomorrow at 9 AM", compute the ISO datetime in Asia/Manila (+08:00) using the current local time below and pass `scheduledAtIso`.',
+  '- When the user says goodbye or asks to end the call, give a short sweet goodbye and invoke `end_call`.',
 ].join('\n');
 
 export function parseJobMetadata(rawMetadata: string | undefined): KallieJobMetadata {
@@ -59,86 +41,64 @@ export function parseJobMetadata(rawMetadata: string | undefined): KallieJobMeta
   }
 }
 
+function getCurrentManilaDateTime(): string {
+  const now = new Date();
+  const formatted = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    weekday: 'long',
+  }).format(now);
+  return `${formatted} (Asia/Manila, UTC+8)`;
+}
+
 export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
   const metadata = parseJobMetadata(ctx.job.metadata);
   const title = metadata.title || 'Call with Kallie';
   const customPrompt =
     metadata.aiPrompt ||
-    'Have a sweet, natural voice conversation and help with any callbacks or reminders they mention.';
+    'Check in warmly on how their day is going and let them know they can ask you to call back or remind them about anything at any time.';
   const selectedVoice = metadata.voice || process.env.GEMINI_VOICE || 'Aoede';
-  const isCallback = Boolean(metadata.isScheduledCallback);
 
   const instructions = [
     DEFAULT_GIRLFRIEND_PERSONA,
     '',
     `Current local date & time: ${getCurrentManilaDateTime()}`,
-    `Call title: "${title}".`,
-    isCallback
-      ? `THIS IS A SCHEDULED CALLBACK / REMINDER YOU INITIATED. Deliver this reminder right away: ${customPrompt}`
-      : `Session note: ${customPrompt}`,
+    `Call context / title: "${title}".`,
+    `Specific note for this call: ${customPrompt}`,
   ].join('\n');
 
-  let endingCall = false;
-  let endCallRequested = false;
-
-  const finalizeHangup = async () => {
-    if (endingCall) return;
-    endingCall = true;
-    await ctx.deleteRoom().catch(() => {});
-    ctx.shutdown('User requested end_call');
-  };
-
-  const requestEndCall = () => {
-    if (endCallRequested) return;
-    endCallRequested = true;
-    // Safety fallback so the call always disconnects even if no goodbye audio is generated
-    setTimeout(() => {
-      void finalizeHangup();
+  let hangupTimer: ReturnType<typeof setTimeout> | null = null;
+  const tools = createKallieScheduleTools(metadata.userId, () => {
+    if (hangupTimer) return;
+    // Allow brief goodbye speech to finish before disconnecting the room
+    hangupTimer = setTimeout(() => {
+      void ctx.room.disconnect();
     }, 3500);
-  };
-
-  const tools = createKallieScheduleTools(metadata.userId, requestEndCall);
+  });
 
   const agent = new voice.Agent({
     instructions,
     tools,
   });
 
-  const modelName =
-    process.env.GEMINI_REALTIME_MODEL || 'gemini-3.1-flash-live-preview';
-  const isGemini3Live = modelName.includes('3.1') || modelName.includes('3.8');
-
   const model = new google.realtime.RealtimeModel({
-    model: modelName,
+    model:
+      process.env.GEMINI_REALTIME_MODEL ||
+      'gemini-2.5-flash-native-audio-preview-12-2025',
     voice: selectedVoice,
     instructions,
     apiKey: process.env.GOOGLE_API_KEY,
-    enableAffectiveDialog: false,
-    thinkingConfig: isGemini3Live
-      ? { thinkingLevel: 'MINIMAL' as never }
-      : { thinkingBudget: 0 },
-    realtimeInputConfig: {
-      automaticActivityDetection: {
-        endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH' as never,
-        silenceDurationMs: 250,
-      },
-    },
+    enableAffectiveDialog: true,
   });
 
   const session = new voice.AgentSession({
     llm: model,
-  });
-
-  session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
-    if (
-      endCallRequested &&
-      event.oldState === 'speaking' &&
-      event.newState !== 'speaking'
-    ) {
-      setTimeout(() => {
-        void finalizeHangup();
-      }, 350);
-    }
   });
 
   const transcript: TranscriptEntry[] = [];
@@ -167,6 +127,9 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
   });
 
   ctx.addShutdownCallback(async () => {
+    if (hangupTimer) {
+      clearTimeout(hangupTimer);
+    }
     if (metadata.sessionId) {
       await saveCallTranscript(metadata.sessionId, transcript);
     }
@@ -188,9 +151,9 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
-  const openingInstruction = isCallback
-    ? `The user just answered your scheduled callback! Greet them warmly as Kallie (their girlfriend) and immediately deliver the scheduled reminder: "${title} — ${customPrompt}". Keep it sweet, clear, and conversational.`
-    : `The user just started a voice call with you! Speak FIRST right now as Kallie (their sweet girlfriend) with a short, warm greeting (1 to 2 sentences) so they can start talking.`;
+  const openingInstruction = metadata.isScheduledCallback
+    ? `You are calling the user back right now for their scheduled reminder: "${title}" (${customPrompt}). Speak FIRST right now as Kallie (their sweet girlfriend) and deliver this reminder warmly in 1 to 2 short sentences.`
+    : `The user just started a voice call with you! Speak FIRST right now as Kallie (their sweet girlfriend) with a warm, natural greeting. Keep it short (1 to 2 sentences) so they can reply.`;
 
   session.generateReply({
     allowInterruptions: false,

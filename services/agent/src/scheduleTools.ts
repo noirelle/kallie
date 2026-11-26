@@ -1,9 +1,9 @@
 import { llm } from '@livekit/agents';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let cachedSupabase: SupabaseClient | null = null;
 
-function getSupabase(): SupabaseClient | null {
+function getSupabaseAdmin(): SupabaseClient | null {
   if (cachedSupabase) {
     return cachedSupabase;
   }
@@ -13,98 +13,125 @@ function getSupabase(): SupabaseClient | null {
     return null;
   }
   cachedSupabase = createClient(url, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
   });
   return cachedSupabase;
 }
 
-function formatManilaTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
+function formatManilaTime(isoString: string): string {
+  return new Intl.DateTimeFormat('en-PH', {
     timeZone: 'Asia/Manila',
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(isoString));
+}
+
+function resolveScheduledDate(args: {
+  delayMinutes?: number;
+  scheduledAtIso?: string;
+}): Date | null {
+  if (
+    typeof args.delayMinutes === 'number' &&
+    Number.isFinite(args.delayMinutes) &&
+    args.delayMinutes > 0
+  ) {
+    return new Date(Date.now() + args.delayMinutes * 60_000);
+  }
+
+  if (args.scheduledAtIso) {
+    const raw = args.scheduledAtIso.trim();
+    const hasOffset = /([zZ]|[+-]\d{2}:\d{2})$/.test(raw);
+    const normalized = hasOffset ? raw : `${raw}+08:00`;
+    const parsed = new Date(normalized);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+
+  return null;
 }
 
 export function createKallieScheduleTools(
   userId: string | undefined,
-  onRequestEndCall?: () => void,
+  onRequestEndCall?: (reason?: string) => void,
 ) {
   const scheduleCallback = llm.tool({
     name: 'schedule_callback',
     description:
-      'Schedule an automated callback phone call or reminder from Kallie at a specific future time. Use this whenever the user asks to be called back, woken up, or reminded about something at a certain time (e.g. "call me in 2 minutes", "remind me at 8 PM", "call me back tomorrow at 9 AM").',
+      'Schedule an automatic AI callback or reminder call from Kallie to the user. Use whenever the user says things like "call me at 8 PM", "remind me to drink water in 2 minutes", or "call me back tomorrow at 9 AM".',
     parameters: {
       type: 'object',
       properties: {
         title: {
           type: 'string',
-          description: 'Short friendly title for the call or reminder (e.g. "Drink Water Reminder", "Morning Call").',
+          description: 'Short label for the call or reminder (e.g., "Morning Call", "Drink Water Reminder").',
         },
         reminderNote: {
           type: 'string',
           description:
-            'Detailed note of what Kallie should say or remind the user about when initiating that future call.',
+            'Exact note or instruction for what Kallie should say or remind the user about when calling back.',
         },
         delayMinutes: {
           type: 'number',
           description:
-            'Use for relative delays like "in 1 minute", "in 10 minutes", "in 2 hours" (e.g. 1, 10, 120). Omit if scheduledAtIso is provided.',
+            'Relative delay in minutes (e.g. 2 for "in 2 minutes", 60 for "in 1 hour"). Prefer this for relative times.',
         },
         scheduledAtIso: {
           type: 'string',
           description:
-            'Absolute ISO-8601 timestamp with +08:00 timezone offset for specific clock times like "tomorrow at 9 AM" (e.g. "2026-11-27T09:00:00+08:00"). Omit if delayMinutes is provided.',
+            'ISO-8601 datetime with +08:00 timezone offset for Asia/Manila (e.g. "2026-11-27T09:00:00+08:00") for specific clock times/dates.',
         },
         recurrence: {
           type: 'string',
           enum: ['none', 'daily', 'weekly'],
-          description: 'Repeat frequency. Defaults to "none".',
+          description: 'Whether this reminder repeats. Defaults to "none".',
         },
       },
       required: ['title', 'reminderNote'],
     },
-    execute: async (args) => {
-      const supabase = getSupabase();
-      if (!supabase || !userId) {
+    execute: async (args: {
+      title: string;
+      reminderNote: string;
+      delayMinutes?: number;
+      scheduledAtIso?: string;
+      recurrence?: 'none' | 'daily' | 'weekly';
+    }) => {
+      if (!userId) {
         return {
           ok: false,
-          error: 'User identity or Supabase database is unavailable for scheduling.',
+          error: 'Unable to save schedule because user session is missing.',
         };
       }
 
-      const title = String(args.title || 'Kallie Reminder').trim();
-      const reminderNote = String(args.reminderNote || title).trim();
-      const recurrence =
-        args.recurrence === 'daily' || args.recurrence === 'weekly' ? args.recurrence : 'none';
-
-      let targetDate: Date | null = null;
-      if (typeof args.delayMinutes === 'number' && args.delayMinutes > 0) {
-        targetDate = new Date(Date.now() + Math.round(args.delayMinutes * 60_000));
-      } else if (typeof args.scheduledAtIso === 'string' && args.scheduledAtIso.trim()) {
-        const parsed = new Date(args.scheduledAtIso.trim());
-        if (!Number.isNaN(parsed.getTime())) {
-          targetDate = parsed;
-        }
+      const supabase = getSupabaseAdmin();
+      if (!supabase) {
+        return {
+          ok: false,
+          error: 'Database is not configured on the agent worker.',
+        };
       }
 
+      const targetDate = resolveScheduledDate(args);
       if (!targetDate) {
         return {
           ok: false,
-          error: 'Could not determine a valid future time. Please ask the user to clarify the time.',
+          error: 'Could not understand the requested time. Please ask the user to clarify.',
         };
       }
 
       const iso = targetDate.toISOString();
+      const recurrence =
+        args.recurrence === 'daily' || args.recurrence === 'weekly' ? args.recurrence : 'none';
+
       const { data, error } = await supabase
         .from('call_schedules')
         .insert({
           user_id: userId,
-          title,
-          ai_prompt: reminderNote,
+          title: args.title.trim(),
+          ai_prompt: args.reminderNote.trim(),
           scheduled_at: iso,
           next_run_at: iso,
           timezone: 'Asia/Manila',
@@ -117,13 +144,13 @@ export function createKallieScheduleTools(
       if (error || !data) {
         return {
           ok: false,
-          error: error?.message || 'Failed to save scheduled call.',
+          error: error?.message || 'Database insert failed',
         };
       }
 
       return {
         ok: true,
-        scheduleId: data.id,
+        id: data.id,
         title: data.title,
         scheduledForLocal: formatManilaTime(data.next_run_at),
         recurrence: data.recurrence,
@@ -134,15 +161,11 @@ export function createKallieScheduleTools(
   const listScheduledCalls = llm.tool({
     name: 'list_scheduled_calls',
     description:
-      'List the user\'s upcoming active scheduled calls and reminders so Kallie can tell them what is scheduled.',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
+      'List the user\'s upcoming scheduled callbacks and reminders so Kallie can tell them what is scheduled.',
     execute: async () => {
-      const supabase = getSupabase();
+      const supabase = getSupabaseAdmin();
       if (!supabase || !userId) {
-        return { ok: false, reminders: [] };
+        return { ok: false, schedules: [] };
       }
 
       const { data, error } = await supabase
@@ -154,16 +177,16 @@ export function createKallieScheduleTools(
         .limit(10);
 
       if (error) {
-        return { ok: false, error: error.message, reminders: [] };
+        return { ok: false, error: error.message, schedules: [] };
       }
 
       return {
         ok: true,
-        reminders: (data || []).map((row) => ({
+        schedules: (data || []).map((row) => ({
           id: row.id,
           title: row.title,
           note: row.ai_prompt,
-          scheduledForLocal: row.next_run_at ? formatManilaTime(row.next_run_at) : 'unscheduled',
+          whenLocal: row.next_run_at ? formatManilaTime(row.next_run_at) : 'unscheduled',
           recurrence: row.recurrence,
         })),
       };
@@ -177,49 +200,40 @@ export function createKallieScheduleTools(
     parameters: {
       type: 'object',
       properties: {
-        keyword: {
+        titleQuery: {
           type: 'string',
-          description: 'Optional keyword from the reminder title (e.g. "water", "morning"). If omitted, cancels the next upcoming call.',
+          description:
+            'Keyword or title of the call/reminder to cancel, or "all" to cancel all active reminders.',
         },
       },
+      required: ['titleQuery'],
     },
-    execute: async (args) => {
-      const supabase = getSupabase();
+    execute: async (args: { titleQuery: string }) => {
+      const supabase = getSupabaseAdmin();
       if (!supabase || !userId) {
-        return { ok: false, error: 'Database unavailable.' };
+        return { ok: false, cancelledCount: 0 };
       }
 
-      const { data: rows, error } = await supabase
+      const query = args.titleQuery.trim();
+      let request = supabase
         .from('call_schedules')
-        .select('id, title, next_run_at')
+        .update({ status: 'paused', updated_at: new Date().toISOString() })
         .eq('user_id', userId)
-        .eq('status', 'active')
-        .order('next_run_at', { ascending: true })
-        .limit(10);
+        .eq('status', 'active');
 
-      if (error || !rows?.length) {
-        return { ok: false, message: 'No active scheduled calls found to cancel.' };
+      if (query.toLowerCase() !== 'all') {
+        request = request.ilike('title', `%${query}%`);
       }
 
-      const keyword = typeof args.keyword === 'string' ? args.keyword.trim().toLowerCase() : '';
-      const target =
-        (keyword
-          ? rows.find((r) => r.title.toLowerCase().includes(keyword))
-          : rows[0]) || rows[0];
-
-      const { error: deleteError } = await supabase
-        .from('call_schedules')
-        .delete()
-        .eq('id', target.id);
-
-      if (deleteError) {
-        return { ok: false, error: deleteError.message };
+      const { data, error } = await request.select('id, title');
+      if (error) {
+        return { ok: false, error: error.message, cancelledCount: 0 };
       }
 
       return {
         ok: true,
-        cancelledTitle: target.title,
-        wasScheduledFor: target.next_run_at ? formatManilaTime(target.next_run_at) : '',
+        cancelledCount: data?.length || 0,
+        cancelledTitles: (data || []).map((d) => d.title),
       };
     },
   });
@@ -227,22 +241,19 @@ export function createKallieScheduleTools(
   const endCall = llm.tool({
     name: 'end_call',
     description:
-      'Immediately end and hang up the current phone call. Call this whenever the user asks to end the call, hang up, drop the call, or says goodbye for now (e.g. "end the call", "end muna yung call", "hang up", "baba ko na", "bye na").',
+      'End the current voice call cleanly after saying goodbye when the user asks to hang up or says bye.',
     parameters: {
       type: 'object',
       properties: {
         reason: {
           type: 'string',
-          description: 'Optional brief reason (e.g. "user asked to hang up").',
+          description: 'Brief reason for ending the call.',
         },
       },
     },
-    execute: async () => {
-      onRequestEndCall?.();
-      return {
-        ok: true,
-        message: 'Call is disconnecting right after your short goodbye. Say a very brief 1-sentence goodbye.',
-      };
+    execute: async (args: { reason?: string }) => {
+      onRequestEndCall?.(args?.reason);
+      return { ok: true, ending: true };
     },
   });
 

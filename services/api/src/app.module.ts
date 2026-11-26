@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { SupabaseModule } from './common/supabase/supabase.module';
 import { CallsModule } from './modules/calls/calls.module';
 import { DevicesModule } from './modules/devices/devices.module';
+import { HealthModule } from './modules/health/health.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
 
@@ -16,6 +17,7 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
     ScheduleModule.forRoot(),
     SupabaseModule,
     NotificationsModule,
+    HealthModule,
     DevicesModule,
     CallsModule,
     SchedulerModule,

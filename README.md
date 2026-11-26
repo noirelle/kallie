@@ -113,14 +113,31 @@ npx eas build --profile preview --platform android
 
 ---
 
-## Verification Scripts
+## Verification and Testing
 
 ```bash
-npm run build:api
-npm run build:agent
-npm run build:web
+npm run test:api        # NestJS build + unit tests (health, calls, scheduler)
+npm run test:agent      # Voice agent unit tests (metadata, voice tools, end_call)
+npm run test:all        # Run all automated test suites
+npm run build:web       # Production Next.js build check
 npm run typecheck:mobile
 ```
+
+---
+
+## Docker and AWS EC2 Deployment
+
+Production containers are defined in `docker-compose.yml` (`api`, `agent`, `web`, and `caddy` for automatic Let's Encrypt HTTPS).
+
+1. Point DNS `A` records for `API_DOMAIN` and `WEB_DOMAIN` to your EC2 public IP and open inbound ports `22`, `80`, and `443` in the EC2 Security Group.
+2. Copy `infra/.env.prod.example` to `.env` at the server repo root (`/opt/kallie/.env`) and upload `services/api/.env`, `services/agent/.env`, and `apps/web/.env.local`.
+3. Run the bootstrap and deployment script on the EC2 instance:
+
+```bash
+bash infra/deploy-ec2.sh
+```
+
+The script installs Docker and Compose if absent, pulls `main`, builds and starts all services with healthchecks, and verifies `GET /health`.
 
 ---
 
