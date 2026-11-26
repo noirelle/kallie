@@ -9,6 +9,23 @@ on:
       - main
 
 jobs:
+  infra:
+    name: Infra Preflight & Compose Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run test:infra
+      - name: Validate docker-compose.yml syntax
+        run: |
+          cp infra/.env.prod.example .env
+          cp services/api/.env.example services/api/.env
+          cp services/agent/.env.example services/agent/.env
+          cp apps/web/.env.example apps/web/.env.local
+          docker compose config -q
+
   api:
     name: API Build & Unit Tests
     runs-on: ubuntu-latest

@@ -2,13 +2,14 @@
 set -euo pipefail
 
 # Kallie EC2 Bootstrap & Deploy Script (Ubuntu / Debian)
+# Runs preflight checks before building and smoke tests after starting containers.
 # Usage: bash infra/deploy-ec2.sh
 
 APP_DIR="${APP_DIR:-/opt/kallie}"
 REPO_URL="${REPO_URL:-https://github.com/noirelle/kallie.git}"
 BRANCH="${BRANCH:-main}"
 
-echo "==> [1/5] Checking Docker & Compose installation..."
+echo "==> [1/6] Checking Docker & Compose installation..."
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -y
   sudo apt-get install -y ca-certificates curl gnupg
@@ -24,7 +25,7 @@ if ! command -v docker >/dev/null 2>&1; then
   sudo usermod -aG docker "$USER" || true
 fi
 
-echo "==> [2/5] Syncing repository in ${APP_DIR}..."
+echo "==> [2/6] Syncing repository in ${APP_DIR}..."
 if [ ! -d "${APP_DIR}/.git" ]; then
   sudo mkdir -p "${APP_DIR}"
   sudo chown -R "$USER:$USER" "${APP_DIR}"
@@ -38,7 +39,7 @@ fi
 
 cd "${APP_DIR}"
 
-echo "==> [3/5] Verifying required env files..."
+echo "==> [3/6] Verifying required env files..."
 for env_file in ".env" "services/api/.env" "services/agent/.env" "apps/web/.env.local"; do
   if [ ! -f "${env_file}" ]; then
     echo "ERROR: Missing ${APP_DIR}/${env_file}. Upload it before deploying."
@@ -46,19 +47,24 @@ for env_file in ".env" "services/api/.env" "services/agent/.env" "apps/web/.env.
   fi
 done
 
-echo "==> [4/5] Building and starting containers..."
+echo "==> [4/6] Running pre-deploy infra checks..."
+docker compose config -q
+if command -v node >/dev/null 2>&1; then
+  node --test infra/test/preflight.test.mjs
+fi
+
+echo "==> [5/6] Building and starting containers..."
 docker compose up -d --build --remove-orphans
 
-echo "==> [5/5] Waiting for API healthcheck..."
+echo "==> [6/6] Running post-deploy smoke tests..."
 for i in $(seq 1 20); do
-  if docker compose exec -T api node -e "fetch('http://127.0.0.1:3001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"; then
-    echo "SUCCESS: Kallie stack is healthy and running."
-    docker compose ps
+  if docker compose exec -T api node -e "fetch('http://127.0.0.1:3001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" 2>/dev/null; then
+    bash infra/test/smoke-deploy.sh
     exit 0
   fi
   sleep 2
 done
 
-echo "ERROR: Kallie API failed healthcheck."
+echo "ERROR: Kallie API failed to become healthy within timeout."
 docker compose logs --tail=50 api
 exit 1
