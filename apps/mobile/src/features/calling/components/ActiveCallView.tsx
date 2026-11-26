@@ -47,6 +47,7 @@ export interface AgentControlBarControls {
 
 interface ActiveCallViewProps {
   isSessionActive?: boolean;
+  isCallReady?: boolean;
   status: CallConnectionState;
   agentState: AgentVisualizerState;
   audioLevel: number;
@@ -75,6 +76,7 @@ const DEFAULT_CONTROLS: Required<AgentControlBarControls> = {
 
 export function ActiveCallView({
   isSessionActive = true,
+  isCallReady = true,
   status,
   agentState,
   audioLevel,
@@ -96,24 +98,39 @@ export function ActiveCallView({
   const [sending, setSending] = useState(false);
   const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
-  // Smooth GPU-driven transition values for session start / end
-  const sessionAnim = useRef(new Animated.Value(isSessionActive ? 1 : 0)).current;
+  // Separate smooth GPU animations:
+  // - promptAnim fades out immediately on tap (0ms latency)
+  // - dockAnim glides in only once the AI agent is actually connected & ready
+  const promptAnim = useRef(new Animated.Value(isSessionActive ? 0 : 1)).current;
+  const dockAnim = useRef(
+    new Animated.Value(isSessionActive && isCallReady ? 1 : 0),
+  ).current;
+
+  const showControls = isSessionActive && isCallReady;
 
   useEffect(() => {
-    if (!isSessionActive && chatOpen) {
+    if (!showControls && chatOpen) {
       Keyboard.dismiss();
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setChatOpen(false);
       setDraft('');
     }
 
-    Animated.timing(sessionAnim, {
-      toValue: isSessionActive ? 1 : 0,
-      duration: isSessionActive ? 280 : 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [chatOpen, isSessionActive, sessionAnim]);
+    Animated.parallel([
+      Animated.timing(promptAnim, {
+        toValue: isSessionActive ? 0 : 1,
+        duration: isSessionActive ? 200 : 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(dockAnim, {
+        toValue: showControls ? 1 : 0,
+        duration: showControls ? 280 : 200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [chatOpen, dockAnim, isSessionActive, promptAnim, showControls]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -132,7 +149,7 @@ export function ActiveCallView({
   const activeControls = { ...DEFAULT_CONTROLS, ...controls };
   const resolvedState: AgentVisualizerState = !isSessionActive
     ? 'idle'
-    : status === 'connecting'
+    : !isCallReady || status === 'connecting'
       ? 'connecting'
       : agentState;
   const isConnected = status === 'connected' || status === 'agent_speaking';
@@ -170,22 +187,16 @@ export function ActiveCallView({
 
   const canSend = Boolean(draft.trim()) && !sending && isConnected;
 
-  const promptOpacity = sessionAnim.interpolate({
-    inputRange: [0, 0.65, 1],
-    outputRange: [1, 0, 0],
-  });
+  const promptOpacity = promptAnim;
 
-  const promptTranslateY = sessionAnim.interpolate({
+  const promptTranslateY = promptAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, 8],
+    outputRange: [8, 0],
   });
 
-  const dockOpacity = sessionAnim.interpolate({
-    inputRange: [0, 0.35, 1],
-    outputRange: [0, 0, 1],
-  });
+  const dockOpacity = dockAnim;
 
-  const dockTranslateY = sessionAnim.interpolate({
+  const dockTranslateY = dockAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [28, 0],
   });
@@ -206,14 +217,18 @@ export function ActiveCallView({
         {/* Main Stage: Single persistent Aura transitions seamlessly between idle, active, and raised-chat */}
         <View style={[styles.stage, chatOpen && styles.stageTranscript]}>
           <Pressable
-            onPress={!isSessionActive ? onStartCall : undefined}
-            disabled={isSessionActive}
+            onPress={!isSessionActive ? onStartCall : !isCallReady ? onEndCall : undefined}
+            disabled={showControls}
             style={({ pressed }) => [
               chatOpen ? styles.raisedAuraHeader : styles.auraWrap,
-              !isSessionActive && pressed && styles.auraPressed,
+              !showControls && pressed && styles.auraPressed,
             ]}
             accessibilityLabel={
-              isSessionActive ? 'Kallie Aura visualizer' : 'Tap Aura to talk'
+              !isSessionActive
+                ? 'Tap Aura to talk'
+                : !isCallReady
+                  ? 'Connecting to Kallie, tap to cancel'
+                  : 'Kallie Aura visualizer'
             }
           >
             <AgentAuraVisualizer
@@ -256,7 +271,7 @@ export function ActiveCallView({
               transform: [{ translateY: dockTranslateY }],
             },
           ]}
-          pointerEvents={isSessionActive ? 'auto' : 'none'}
+          pointerEvents={showControls ? 'auto' : 'none'}
         >
           {chatOpen && activeControls.chat ? (
             <View style={styles.composerRow}>

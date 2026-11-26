@@ -20,6 +20,7 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
   const {
     status,
     agentState,
+    agentReady,
     error,
     isMuted,
     isCameraOn,
@@ -46,6 +47,8 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
 
   return (
     <ActiveCallView
+      isSessionActive
+      isCallReady={agentReady}
       status={status}
       agentState={agentState}
       audioLevel={audioLevel}

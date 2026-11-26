@@ -19,7 +19,7 @@ cli.runApp(
   new ServerOptions({
     agent: fileURLToPath(import.meta.url),
     agentName,
-    numIdleProcesses: 1,
+    numIdleProcesses: 2,
     initializeProcessTimeout: 30_000,
   }),
 );

@@ -27,6 +27,7 @@ export default function HomeScreen() {
   const {
     status,
     agentState,
+    agentReady,
     error,
     isMuted,
     audioLevel,
@@ -84,6 +85,7 @@ export default function HomeScreen() {
   return (
     <ActiveCallView
       isSessionActive={sessionActive}
+      isCallReady={agentReady}
       status={status}
       agentState={agentState}
       audioLevel={audioLevel}

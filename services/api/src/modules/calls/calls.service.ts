@@ -117,35 +117,53 @@ export class CallsService {
   ) {
     this.assertLiveKitConfigured();
 
+    const sessionId = crypto.randomUUID();
     const roomName = `kallie-${crypto.randomUUID()}`;
     const title = dto.title?.trim() || 'Call with Kallie';
     const aiPrompt =
       dto.aiPrompt?.trim() ||
       'Check in on how their day is going, ask if they have eaten or rested, and have a sweet, natural chat.';
+    const startedAt = new Date().toISOString();
 
-    const { data: session, error } = await this.supabaseAdmin.client
-      .from('call_sessions')
-      .insert({
-        user_id: userId,
-        room_name: roomName,
-        title,
-        ai_prompt: aiPrompt,
-        status: 'accepted',
-        started_at: new Date().toISOString(),
-      })
-      .select()
-      .single<CallSessionRecord>();
+    const draftSession: CallSessionRecord = {
+      id: sessionId,
+      schedule_id: null,
+      user_id: userId,
+      room_name: roomName,
+      title,
+      ai_prompt: aiPrompt,
+      status: 'accepted',
+      started_at: startedAt,
+      ended_at: null,
+    };
 
-    if (error || !session) {
+    // Run DB insert, LiveKit agent dispatch, and user token minting concurrently
+    // so the AI worker starts warming the room immediately on tap.
+    const [insertResult, , token] = await Promise.all([
+      this.supabaseAdmin.client
+        .from('call_sessions')
+        .insert({
+          id: sessionId,
+          user_id: userId,
+          room_name: roomName,
+          title,
+          ai_prompt: aiPrompt,
+          status: 'accepted',
+          started_at: startedAt,
+        })
+        .select()
+        .single<CallSessionRecord>(),
+      this.dispatchKallieAgent(draftSession, dto.voice, true),
+      this.mintUserToken(roomName, userId, userEmail),
+    ]);
+
+    if (insertResult.error || !insertResult.data) {
       throw new InternalServerErrorException(
-        `Failed to create test call session: ${error?.message}`,
+        `Failed to create test call session: ${insertResult.error?.message}`,
       );
     }
 
-    const [, token] = await Promise.all([
-      this.dispatchKallieAgent(session, dto.voice, true),
-      this.mintUserToken(session.room_name, userId, userEmail),
-    ]);
+    const session = insertResult.data;
 
     return {
       session,

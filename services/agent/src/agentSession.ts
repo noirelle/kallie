@@ -87,14 +87,16 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
     tools,
   });
 
+  const selectedModel =
+    process.env.GEMINI_REALTIME_MODEL || 'gemini-3.1-flash-live-preview';
+  const supportsAffectiveDialog = selectedModel.startsWith('gemini-2.5-');
+
   const model = new google.realtime.RealtimeModel({
-    model:
-      process.env.GEMINI_REALTIME_MODEL ||
-      'gemini-2.5-flash-native-audio-preview-12-2025',
+    model: selectedModel,
     voice: selectedVoice,
     instructions,
     apiKey: process.env.GOOGLE_API_KEY,
-    enableAffectiveDialog: true,
+    ...(supportsAffectiveDialog ? { enableAffectiveDialog: true } : {}),
   });
 
   const session = new voice.AgentSession({
@@ -148,15 +150,17 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
 
   if (ctx.room.remoteParticipants.size === 0) {
     await ctx.waitForParticipant();
-    await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
   const openingInstruction = metadata.isScheduledCallback
     ? `You are calling the user back right now for their scheduled reminder: "${title}" (${customPrompt}). Speak FIRST right now as Kallie (their sweet girlfriend) and deliver this reminder warmly in 1 to 2 short sentences.`
     : `The user just started a voice call with you! Speak FIRST right now as Kallie (their sweet girlfriend) with a warm, natural greeting. Keep it short (1 to 2 sentences) so they can reply.`;
 
-  session.generateReply({
-    allowInterruptions: false,
-    instructions: openingInstruction,
-  });
+  try {
+    session.generateReply({
+      instructions: openingInstruction,
+    });
+  } catch (err) {
+    console.warn('[KallieAgent] Skipping initial greeting (session already closed):', err);
+  }
 }

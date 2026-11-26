@@ -116,6 +116,7 @@ export function useLiveKitCall(params: {
   const [isScreenShareOn, setIsScreenShareOn] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [agentJoined, setAgentJoined] = useState(false);
+  const [agentReady, setAgentReady] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [messages, setMessages] = useState<CallChatMessage[]>([]);
@@ -163,6 +164,7 @@ export function useLiveKitCall(params: {
       setIsCameraOn(false);
       setIsScreenShareOn(false);
       setAgentJoined(false);
+      setAgentReady(false);
       setAudioLevel(0);
       setElapsedSeconds(0);
       setMessages([]);
@@ -196,6 +198,9 @@ export function useLiveKitCall(params: {
       const parsed = parseAgentState(attrs?.['lk.agent.state']);
       if (parsed && !cancelled) {
         setAgentState(parsed);
+        if (parsed === 'listening' || parsed === 'thinking' || parsed === 'speaking') {
+          setAgentReady(true);
+        }
         if (parsed === 'speaking') {
           setStatus('agent_speaking');
         } else if (wasConnectedRef.current) {
@@ -222,6 +227,7 @@ export function useLiveKitCall(params: {
         (speaker) => speaker.identity !== room.localParticipant.identity,
       );
       if (remoteSpeaker) {
+        setAgentReady(true);
         setStatus('agent_speaking');
         setAgentState('speaking');
         setAudioLevel(Math.max(0.35, Math.min(1, remoteSpeaker.audioLevel || 0.65)));
@@ -241,6 +247,9 @@ export function useLiveKitCall(params: {
       }
       if (!cancelled) {
         setAgentJoined(true);
+        if (track.kind === Track.Kind.Audio) {
+          setAgentReady(true);
+        }
       }
     });
 
@@ -253,10 +262,12 @@ export function useLiveKitCall(params: {
     room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
       if (cancelled) return;
       const isLocal = participant?.identity === room.localParticipant.identity;
+      // Keep voice experience clean: never turn the user's spoken STT into chat bubbles
+      if (isLocal) return;
       for (const seg of segments) {
         upsertMessage(
           `seg-${seg.id}`,
-          isLocal ? 'user' : 'kallie',
+          'kallie',
           seg.text,
           seg.firstReceivedTime || Date.now(),
         );
@@ -268,9 +279,12 @@ export function useLiveKitCall(params: {
         info?: { id?: string; timestamp?: number; attributes?: Record<string, string> };
       },
       participantInfo: { identity: string },
+      topic: 'lk.transcription' | 'lk.chat',
     ) => {
       if (cancelled) return;
       const isLocal = participantInfo.identity === room.localParticipant.identity;
+      // Skip local user's voice STT streams; only render typed lk.chat messages or Kallie's replies
+      if (isLocal && topic === 'lk.transcription') return;
       const segId =
         reader.info?.attributes?.['lk.segment_id'] ||
         reader.info?.id ||
@@ -290,10 +304,10 @@ export function useLiveKitCall(params: {
 
     try {
       room.registerTextStreamHandler('lk.transcription', (reader, participantInfo) => {
-        void handleTextStream(reader, participantInfo);
+        void handleTextStream(reader, participantInfo, 'lk.transcription');
       });
       room.registerTextStreamHandler('lk.chat', (reader, participantInfo) => {
-        void handleTextStream(reader, participantInfo);
+        void handleTextStream(reader, participantInfo, 'lk.chat');
       });
     } catch {
       // Safe fallback if handler already registered
@@ -352,12 +366,20 @@ export function useLiveKitCall(params: {
         await room.localParticipant.setMicrophoneEnabled(true);
 
         if (!cancelled) {
-          setAgentJoined(room.remoteParticipants.size > 0);
+          const hasRemote = room.remoteParticipants.size > 0;
+          setAgentJoined(hasRemote);
           setStatus('connected');
-          setAgentState('listening');
+          let alreadyHasAudio = false;
           room.remoteParticipants.forEach((participant) => {
             syncAgentAttrState(participant.attributes);
+            participant.audioTrackPublications.forEach((pub) => {
+              if (pub.isSubscribed) alreadyHasAudio = true;
+            });
           });
+          if (alreadyHasAudio) {
+            setAgentReady(true);
+            setAgentState((prev) => (prev === 'connecting' ? 'listening' : prev));
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -465,6 +487,7 @@ export function useLiveKitCall(params: {
     // Update UI immediately without blocking on WebRTC/HTTP teardown
     setStatus('disconnected');
     setAgentState('idle');
+    setAgentReady(false);
 
     if (room) {
       void room.disconnect().catch(() => {});
@@ -484,6 +507,7 @@ export function useLiveKitCall(params: {
     isScreenShareOn,
     isSpeakerOn,
     agentJoined,
+    agentReady,
     audioLevel,
     elapsedSeconds,
     messages,
