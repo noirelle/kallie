@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       apk_url:
-        description: "Direct URL to APK to test (defaults to latest GitHub Release)"
+        description: "Direct URL to APK to test"
         required: false
         default: "https://github.com/noirelle/kallie/releases/download/v0.1.1/kallie-v0.1.1.apk"
       api_level:
@@ -19,6 +19,9 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Enable KVM group perms
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -29,7 +32,6 @@ jobs:
         run: |
           curl -fSL "${{ inputs.apk_url }}" -o app-test.apk
           ls -lh app-test.apk
-          aapt2 dump badging app-test.apk 2>/dev/null | head -n 30 || true
 
       - name: Run APK on Android Emulator & Capture Logcat
         uses: reactivecircus/android-emulator-runner@v2
@@ -40,57 +42,14 @@ jobs:
           profile: pixel_6
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            set +e
-            echo "=== Device ABI & Android Version ==="
-            adb shell getprop ro.product.cpu.abilist
-            adb shell getprop ro.build.version.release
-            adb shell getprop ro.build.version.sdk
+          script: bash infra/test/verify-apk-emulator.sh app-test.apk
 
-            echo "=== Installing APK ==="
-            adb install -r -g app-test.apk
-            INSTALL_CODE=$?
-            echo "Install exit code: $INSTALL_CODE"
-            if [ $INSTALL_CODE -ne 0 ]; then
-              echo "APK FAILED TO INSTALL!"
-              exit 1
-            fi
-
-            echo "=== Clearing logcat and launching com.kallie.app ==="
-            adb logcat -c
-            adb shell monkey -p com.kallie.app -c android.intent.category.LAUNCHER 1
-            sleep 10
-
-            echo "=== Process & Focused Window Check ==="
-            PID=$(adb shell pidof com.kallie.app | tr -d '\r')
-            echo "PID after 10s: '${PID}'"
-            adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" || true
-
-            echo "=== Crash / Fatal / ReactNative / Expo / Firebase Logcat ==="
-            adb logcat -d -v time | grep -E "(FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|ReactNative|com\.kallie\.app|SoLoader|UnsatisfiedLinkError|Firebase|CallKeep|LiveKit|WebRTC|ExpoUpdates|ErrorRecovery|libc|DEBUG)" | tail -n 250
-
-            echo "=== Capturing UI Hierarchy & Screenshot ==="
-            adb shell uiautomator dump /sdcard/window_dump.xml || true
-            adb shell cat /sdcard/window_dump.xml 2>/dev/null | head -c 4000 || true
-            echo ""
-            adb exec-out screencap -p > emulator-screen.png || true
-
-            if [ -z "$PID" ]; then
-              echo "RESULT: CRASHED (process com.kallie.app is not running)"
-              exit 1
-            fi
-
-            if adb logcat -d | grep -q "FATAL EXCEPTION"; then
-              echo "RESULT: FATAL EXCEPTION detected in logcat"
-              exit 1
-            fi
-
-            echo "RESULT: APP RUNNING SUCCESSFULLY (PID=$PID)"
-
-      - name: Upload Emulator Screenshot
+      - name: Upload Emulator Evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emulator-screenshot
-          path: emulator-screen.png
+          name: emulator-evidence
+          path: |
+            emulator-screen.png
+            full-logcat.txt
           if-no-files-found: ignore
