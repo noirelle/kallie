@@ -11,6 +11,14 @@ on:
         description: "Android API level"
         required: false
         default: "34"
+      test_email:
+        description: "Optional test account email for interactive flow"
+        required: false
+        default: ""
+      test_password:
+        description: "Optional test account password for interactive flow"
+        required: false
+        default: ""
 
 jobs:
   emulator-test:
@@ -35,6 +43,9 @@ jobs:
 
       - name: Run APK on Android Emulator & Capture Logcat
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_EMAIL: ${{ inputs.test_email }}
+          TEST_PASSWORD: ${{ inputs.test_password }}
         with:
           api-level: ${{ inputs.api_level }}
           target: google_apis
@@ -50,6 +61,6 @@ jobs:
         with:
           name: emulator-evidence
           path: |
-            emulator-screen.png
+            emulator-screen-*.png
             full-logcat.txt
           if-no-files-found: ignore
