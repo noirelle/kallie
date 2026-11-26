@@ -11,6 +11,22 @@ export type CallConnectionState =
   | 'disconnected'
   | 'error';
 
+export type AgentVisualizerState =
+  | 'connecting'
+  | 'listening'
+  | 'thinking'
+  | 'speaking';
+
+function parseAgentState(raw?: string): AgentVisualizerState | null {
+  if (!raw) return null;
+  const normalized = raw.toLowerCase();
+  if (normalized === 'speaking') return 'speaking';
+  if (normalized === 'thinking') return 'thinking';
+  if (normalized === 'listening') return 'listening';
+  if (normalized === 'initializing' || normalized === 'connecting') return 'connecting';
+  return null;
+}
+
 export interface CallChatMessage {
   id: string;
   sender: 'user' | 'kallie';
@@ -86,6 +102,7 @@ export function useLiveKitCall(params: {
   onRemoteEnded?: () => void;
 }) {
   const [status, setStatus] = useState<CallConnectionState>('connecting');
+  const [agentState, setAgentState] = useState<AgentVisualizerState>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
@@ -148,10 +165,28 @@ export function useLiveKitCall(params: {
     });
     roomRef.current = room;
 
-    room.on(RoomEvent.ParticipantConnected, () => {
+    const syncAgentAttrState = (attrs?: Record<string, string>) => {
+      const parsed = parseAgentState(attrs?.['lk.agent.state']);
+      if (parsed && !cancelled) {
+        setAgentState(parsed);
+        if (parsed === 'speaking') {
+          setStatus('agent_speaking');
+        } else if (wasConnectedRef.current) {
+          setStatus('connected');
+        }
+      }
+    };
+
+    room.on(RoomEvent.ParticipantConnected, (participant) => {
       if (!cancelled) {
         setAgentJoined(true);
+        syncAgentAttrState(participant.attributes);
       }
+    });
+
+    room.on(RoomEvent.ParticipantAttributesChanged, (_changed, participant) => {
+      if (cancelled || participant.identity === room.localParticipant.identity) return;
+      syncAgentAttrState(participant.attributes);
     });
 
     room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
@@ -161,9 +196,11 @@ export function useLiveKitCall(params: {
       );
       if (remoteSpeaker) {
         setStatus('agent_speaking');
+        setAgentState('speaking');
         setAudioLevel(Math.max(0.35, Math.min(1, remoteSpeaker.audioLevel || 0.65)));
       } else if (wasConnectedRef.current) {
         setStatus('connected');
+        setAgentState((prev) => (prev === 'thinking' ? 'thinking' : 'listening'));
         setAudioLevel(0.12);
       }
     });
@@ -290,6 +327,10 @@ export function useLiveKitCall(params: {
         if (!cancelled) {
           setAgentJoined(room.remoteParticipants.size > 0);
           setStatus('connected');
+          setAgentState('listening');
+          room.remoteParticipants.forEach((participant) => {
+            syncAgentAttrState(participant.attributes);
+          });
         }
       } catch (err) {
         if (!cancelled) {
@@ -327,10 +368,11 @@ export function useLiveKitCall(params: {
 
       const msgId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       upsertMessage(msgId, 'user', trimmed);
+      setAgentState('thinking');
       try {
         await room.localParticipant.sendText(trimmed, { topic: 'lk.chat' });
       } catch {
-        // Ignore send errors when disconnected
+        setAgentState('listening');
       }
     },
     [upsertMessage],
@@ -368,6 +410,7 @@ export function useLiveKitCall(params: {
 
   return {
     status,
+    agentState,
     error,
     isMuted,
     isSpeakerOn,

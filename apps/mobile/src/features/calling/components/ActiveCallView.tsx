@@ -1,13 +1,27 @@
 import React, { useState } from 'react';
-import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CallChatMessage, CallConnectionState } from '../hooks/useLiveKitCall';
-import { AudioBarsVisualizer } from './AudioBarsVisualizer';
-import { CallChatDrawer } from './CallChatDrawer';
-import { ChatIcon, HangupIcon, MicIcon, SpeakerIcon } from './CallIcons';
+import {
+  AgentVisualizerState,
+  CallChatMessage,
+  CallConnectionState,
+} from '../hooks/useLiveKitCall';
+import { AgentAuraVisualizer } from './AgentAuraVisualizer';
+import { AgentChatTranscript } from './AgentChatTranscript';
+import { ChatIcon, HangupIcon, MicIcon, SendIcon, SpeakerIcon } from './CallIcons';
 
 interface ActiveCallViewProps {
   status: CallConnectionState;
+  agentState: AgentVisualizerState;
   audioLevel: number;
   elapsedSeconds: number;
   isMuted: boolean;
@@ -26,8 +40,22 @@ function formatDuration(totalSeconds: number): string {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
+function getStatusPrompt(state: AgentVisualizerState, status: CallConnectionState): string {
+  if (status === 'connecting' || state === 'connecting') {
+    return 'Connecting to Kallie...';
+  }
+  if (state === 'speaking') {
+    return 'Kallie is speaking';
+  }
+  if (state === 'thinking') {
+    return 'Kallie is thinking...';
+  }
+  return 'Kallie is listening, ask a question';
+}
+
 export function ActiveCallView({
   status,
+  agentState,
   audioLevel,
   elapsedSeconds,
   isMuted,
@@ -40,65 +68,163 @@ export function ActiveCallView({
   onEndCall,
 }: ActiveCallViewProps) {
   const [chatOpen, setChatOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const handleSend = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    setDraft('');
+    try {
+      await onSendMessage(trimmed);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const canSend = Boolean(draft.trim()) && !sending;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.topBar}>
-        <Image
-          source={require('../../../../assets/icon.png')}
-          style={styles.topLogo}
-          resizeMode="contain"
-        />
-        <Text style={styles.timer}>
-          {status === 'connecting' ? 'CONNECTING' : formatDuration(elapsedSeconds)}
-        </Text>
-      </View>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        {/* Minimal Session Top Bar */}
+        <View style={styles.topBar}>
+          <View style={styles.brandGroup}>
+            <Image
+              source={require('../../../../assets/icon.png')}
+              style={styles.topLogo}
+              resizeMode="contain"
+            />
+            <Text style={styles.brandName}>Kallie</Text>
+          </View>
+          <Text style={styles.timer}>
+            {status === 'connecting' ? 'Connecting' : formatDuration(elapsedSeconds)}
+          </Text>
+        </View>
 
-      <View style={styles.center}>
+        {/* Session Stage: Aura-first OR Compact Aura + Live Transcript */}
         {chatOpen ? (
-          <CallChatDrawer messages={messages} onSend={onSendMessage} />
+          <View style={styles.transcriptStage}>
+            <View style={styles.compactAuraHeader}>
+              <AgentAuraVisualizer
+                state={agentState}
+                audioLevel={audioLevel}
+                size="sm"
+              />
+              <Text style={styles.compactStatus}>
+                {getStatusPrompt(agentState, status)}
+              </Text>
+            </View>
+
+            <View style={styles.transcriptBody}>
+              <AgentChatTranscript messages={messages} agentState={agentState} />
+            </View>
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          </View>
         ) : (
-          <AudioBarsVisualizer status={status} audioLevel={audioLevel} />
+          <View style={styles.auraStage}>
+            <View style={styles.auraCenter}>
+              <AgentAuraVisualizer
+                state={agentState}
+                audioLevel={audioLevel}
+                size="lg"
+              />
+              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            </View>
+            <Text style={styles.statusHint}>
+              {getStatusPrompt(agentState, status)}
+            </Text>
+          </View>
         )}
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      </View>
 
-      <View style={styles.controlBar}>
-        <Pressable
-          style={[styles.iconBtn, isMuted && styles.iconBtnActive]}
-          onPress={onToggleMute}
-          accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-        >
-          <MicIcon color={isMuted ? '#000000' : '#FAFAFA'} muted={isMuted} />
-        </Pressable>
+        {/* LiveKit Agents UI-style Expandable Control Bar */}
+        <View style={styles.controlDock}>
+          {chatOpen ? (
+            <View style={styles.composerRow}>
+              <TextInput
+                style={styles.composerInput}
+                value={draft}
+                onChangeText={setDraft}
+                placeholder="Type something..."
+                placeholderTextColor="#71717A"
+                returnKeyType="send"
+                onSubmitEditing={handleSend}
+                editable={!sending}
+              />
+              <Pressable
+                style={({ pressed }) => [
+                  styles.sendBtn,
+                  canSend && styles.sendBtnReady,
+                  pressed && canSend && styles.sendBtnPressed,
+                ]}
+                onPress={handleSend}
+                disabled={!canSend}
+                accessibilityLabel="Send message"
+              >
+                <SendIcon color={canSend ? '#000000' : '#71717A'} />
+              </Pressable>
+            </View>
+          ) : null}
 
-        {Platform.OS !== 'web' ? (
-          <Pressable
-            style={[styles.iconBtn, isSpeakerOn && styles.iconBtnActive]}
-            onPress={onToggleSpeaker}
-            accessibilityLabel={isSpeakerOn ? 'Switch to earpiece' : 'Switch to speaker'}
-          >
-            <SpeakerIcon color={isSpeakerOn ? '#000000' : '#FAFAFA'} active={isSpeakerOn} />
-          </Pressable>
-        ) : null}
+          <View style={styles.controlActions}>
+            <View style={styles.leftActions}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.actionBtn,
+                  isMuted && styles.actionBtnMuted,
+                  pressed && styles.actionBtnPressed,
+                ]}
+                onPress={onToggleMute}
+                accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+              >
+                <MicIcon color={isMuted ? '#F87171' : '#FAFAFA'} muted={isMuted} />
+              </Pressable>
 
-        <Pressable
-          style={[styles.iconBtn, chatOpen && styles.iconBtnActive]}
-          onPress={() => setChatOpen((prev) => !prev)}
-          accessibilityLabel={chatOpen ? 'Hide live chat' : 'Show live chat'}
-        >
-          <ChatIcon color={chatOpen ? '#000000' : '#FAFAFA'} />
-        </Pressable>
+              {Platform.OS !== 'web' ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.actionBtn,
+                    isSpeakerOn && styles.actionBtnSpeakerOn,
+                    pressed && styles.actionBtnPressed,
+                  ]}
+                  onPress={onToggleSpeaker}
+                  accessibilityLabel={isSpeakerOn ? 'Switch to earpiece' : 'Switch to speaker'}
+                >
+                  <SpeakerIcon color="#FAFAFA" active={isSpeakerOn} />
+                </Pressable>
+              ) : null}
 
-        <Pressable
-          style={styles.endBtn}
-          onPress={onEndCall}
-          accessibilityLabel="End call"
-        >
-          <HangupIcon color="#FFFFFF" />
-          <Text style={styles.endBtnText}>END</Text>
-        </Pressable>
-      </View>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.actionBtn,
+                  chatOpen && styles.actionBtnChatOpen,
+                  pressed && styles.actionBtnPressed,
+                ]}
+                onPress={() => setChatOpen((prev) => !prev)}
+                accessibilityLabel={chatOpen ? 'Hide transcript' : 'Show transcript'}
+              >
+                <ChatIcon color={chatOpen ? '#1FD5F9' : '#FAFAFA'} />
+              </Pressable>
+            </View>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.endBtn,
+                pressed && styles.endBtnPressed,
+              ]}
+              onPress={onEndCall}
+              accessibilityLabel="End call"
+            >
+              <HangupIcon color="#F87171" />
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -107,81 +233,176 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000000',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-    paddingTop: 12,
+  },
+  flex: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 20,
   },
   topBar: {
-    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 8,
   },
+  brandGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   topLogo: {
-    width: 28,
-    height: 28,
+    width: 26,
+    height: 26,
     borderRadius: 6,
   },
+  brandName: {
+    color: '#FAFAFA',
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
   timer: {
-    color: '#A1A1AA',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.4,
+    color: '#71717A',
+    fontSize: 13,
+    fontWeight: '500',
     fontVariant: ['tabular-nums'],
   },
-  center: {
+  auraStage: {
+    flex: 1,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 18,
+  },
+  auraCenter: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
   },
-  errorText: {
-    color: '#F87171',
-    fontSize: 13,
-    marginTop: 20,
+  statusHint: {
+    color: '#A1A1AA',
+    fontSize: 14,
+    fontWeight: '400',
     textAlign: 'center',
-    paddingHorizontal: 16,
-    lineHeight: 19,
+    letterSpacing: -0.1,
   },
-  controlBar: {
+  transcriptStage: {
+    flex: 1,
+    width: '100%',
+    paddingBottom: 10,
+  },
+  compactAuraHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-    backgroundColor: '#0A0A0A',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  compactStatus: {
+    color: '#A1A1AA',
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  transcriptBody: {
+    flex: 1,
+    width: '100%',
+  },
+  errorText: {
+    color: '#F87171',
+    fontSize: 13,
+    marginTop: 14,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    lineHeight: 19,
+  },
+  controlDock: {
+    width: '100%',
+    backgroundColor: '#0A0A0C',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: 28,
+    padding: 10,
   },
-  iconBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#161616',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  iconBtnActive: {
-    backgroundColor: '#FAFAFA',
-  },
-  endBtn: {
+  composerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#DC2626',
-    paddingHorizontal: 22,
-    height: 48,
-    borderRadius: 999,
+    gap: 10,
+    paddingBottom: 10,
+    marginBottom: 10,
+    paddingHorizontal: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
-  endBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
+  composerInput: {
+    flex: 1,
+    color: '#FAFAFA',
+    fontSize: 15,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  sendBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#1C1C20',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendBtnReady: {
+    backgroundColor: '#1FD5F9',
+  },
+  sendBtnPressed: {
+    backgroundColor: '#67E8F9',
+  },
+  controlActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  leftActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  actionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#18181B',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionBtnPressed: {
+    opacity: 0.8,
+  },
+  actionBtnMuted: {
+    backgroundColor: 'rgba(239, 68, 68, 0.16)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  actionBtnSpeakerOn: {
+    backgroundColor: '#222226',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  actionBtnChatOpen: {
+    backgroundColor: 'rgba(31, 213, 249, 0.16)',
+    borderColor: 'rgba(31, 213, 249, 0.42)',
+  },
+  endBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(239, 68, 68, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  endBtnPressed: {
+    backgroundColor: 'rgba(239, 68, 68, 0.32)',
   },
 });

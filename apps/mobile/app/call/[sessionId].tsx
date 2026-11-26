@@ -19,6 +19,7 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
 
   const {
     status,
+    agentState,
     error,
     isMuted,
     isSpeakerOn,
@@ -44,6 +45,7 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
   return (
     <ActiveCallView
       status={status}
+      agentState={agentState}
       audioLevel={audioLevel}
       elapsedSeconds={elapsedSeconds}
       isMuted={isMuted}
