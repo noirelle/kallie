@@ -6,12 +6,43 @@ PKG="com.kallie.app"
 TEST_EMAIL="${TEST_EMAIL:-}"
 TEST_PASSWORD="${TEST_PASSWORD:-}"
 
+dismiss_system_dialogs() {
+  for i in 1 2 3; do
+    adb shell uiautomator dump /sdcard/sys_dump.xml >/dev/null 2>&1 || true
+    adb pull /sdcard/sys_dump.xml sys_dump.xml >/dev/null 2>&1 || true
+    python3 - <<'PYEOF'
+import re, subprocess, xml.etree.ElementTree as ET
+try:
+    root = ET.parse('sys_dump.xml').getroot()
+    for node in root.iter('node'):
+        txt = node.attrib.get('text', '').strip().lower()
+        rid = node.attrib.get('resource-id', '')
+        if txt in ('close app', 'wait', 'allow', 'while using the app', 'only this time') or 'permission_allow' in rid or 'aerr_close' in rid:
+            m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds', ''))
+            if m:
+                x1, y1, x2, y2 = map(int, m.groups())
+                print(f"Dismissing/allowing dialog button '{txt}' ({rid}) at {(x1+x2)//2},{(y1+y2)//2}")
+                subprocess.run(['adb', 'shell', 'input', 'tap', str((x1+x2)//2), str((y1+y2)//2)])
+                raise SystemExit(0)
+    raise SystemExit(1)
+except SystemExit as e:
+    raise e
+except Exception:
+    raise SystemExit(1)
+PYEOF
+    if [ $? -ne 0 ]; then
+      break
+    fi
+    sleep 2
+  done
+}
+
 echo "=== Device ABI & Android Version ==="
 adb shell getprop ro.product.cpu.abilist
 adb shell getprop ro.build.version.release
 adb shell getprop ro.build.version.sdk
 
-echo "=== Installing APK (standard user install without -g): ${APK_PATH} ==="
+echo "=== Installing APK: ${APK_PATH} ==="
 adb install -r "${APK_PATH}"
 INSTALL_CODE=$?
 echo "INSTALL_EXIT_CODE=${INSTALL_CODE}"
@@ -24,6 +55,7 @@ echo "=== Clearing logcat and launching ${PKG} ==="
 adb logcat -c
 adb shell monkey -p "${PKG}" -c android.intent.category.LAUNCHER 1
 sleep 10
+dismiss_system_dialogs
 
 PID=$(adb shell pidof "${PKG}" | tr -d '\r')
 echo "PID_AFTER_LAUNCH='${PID}'"
@@ -34,9 +66,8 @@ if [ -n "${PID}" ] && [ -n "${TEST_EMAIL}" ] && [ -n "${TEST_PASSWORD}" ]; then
   adb shell uiautomator dump /sdcard/login_dump.xml >/dev/null 2>&1 || true
   adb pull /sdcard/login_dump.xml login_dump.xml >/dev/null 2>&1 || true
 
-  # Use python3 to find EditText and SIGN IN coordinates reliably
   python3 - <<'PYEOF'
-import re, subprocess, time, xml.etree.ElementTree as ET
+import os, re, subprocess, time, xml.etree.ElementTree as ET
 
 def parse_center(bounds):
     m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
@@ -60,7 +91,6 @@ try:
             signin_btn = parse_center(bounds)
     print(f"Found edits={edits}, signin_btn={signin_btn}")
     if len(edits) >= 2 and signin_btn:
-        import os
         email = os.environ['TEST_EMAIL']
         pwd = os.environ['TEST_PASSWORD']
         subprocess.run(['adb', 'shell', 'input', 'tap', str(edits[0][0]), str(edits[0][1])])
@@ -71,50 +101,33 @@ try:
         time.sleep(0.5)
         subprocess.run(['adb', 'shell', 'input', 'text', pwd])
         time.sleep(0.5)
-        subprocess.run(['adb', 'shell', 'input', 'keyevent', '4']) # hide keyboard
-        time.sleep(0.5)
+        subprocess.run(['adb', 'shell', 'input', 'keyevent', '4'])
+        time.sleep(0.6)
         subprocess.run(['adb', 'shell', 'input', 'tap', str(signin_btn[0]), str(signin_btn[1])])
         print("Submitted login form.")
 except Exception as e:
     print("Login automation error:", e)
 PYEOF
 
-  sleep 8
-  echo "=== Dismissing / Allowing any Android runtime permission dialogs ==="
-  for attempt in 1 2 3; do
-    adb shell uiautomator dump /sdcard/perm_dump.xml >/dev/null 2>&1 || true
-    adb pull /sdcard/perm_dump.xml perm_dump.xml >/dev/null 2>&1 || true
-    python3 - <<'PYEOF'
-import re, subprocess, xml.etree.ElementTree as ET
-try:
-    root = ET.parse('perm_dump.xml').getroot()
-    for node in root.iter('node'):
-        txt = node.attrib.get('text', '').strip().lower()
-        rid = node.attrib.get('resource-id', '')
-        if txt in ('allow', 'while using the app', 'only this time') or 'permission_allow' in rid:
-            m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds', ''))
-            if m:
-                x1, y1, x2, y2 = map(int, m.groups())
-                print(f"Tapping permission button '{txt}' ({rid}) at {(x1+x2)//2},{(y1+y2)//2}")
-                subprocess.run(['adb', 'shell', 'input', 'tap', str((x1+x2)//2), str((y1+y2)//2)])
-                break
-except Exception as e:
-    print("Perm dump parse note:", e)
-PYEOF
-    sleep 3
-  done
+  sleep 6
+  echo "=== Allowing runtime permission dialogs after login ==="
+  dismiss_system_dialogs
+  sleep 6
+  dismiss_system_dialogs
+  sleep 4
 
   PID_POST_LOGIN=$(adb shell pidof "${PKG}" | tr -d '\r')
   echo "PID_AFTER_LOGIN_AND_PERMS='${PID_POST_LOGIN}'"
   adb exec-out screencap -p > emulator-screen-postlogin.png || true
 
-  # Also test closing and cold-relaunching while logged in
   if [ -n "${PID_POST_LOGIN}" ]; then
     echo "=== Testing cold relaunch while logged in ==="
     adb shell am force-stop "${PKG}"
     sleep 2
     adb shell monkey -p "${PKG}" -c android.intent.category.LAUNCHER 1
-    sleep 10
+    sleep 8
+    dismiss_system_dialogs
+    sleep 4
     PID_RELAUNCH=$(adb shell pidof "${PKG}" | tr -d '\r')
     echo "PID_AFTER_RELAUNCH='${PID_RELAUNCH}'"
     adb exec-out screencap -p > emulator-screen-relaunch.png || true
@@ -128,7 +141,7 @@ adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" || true
 
 echo "=== Full Crash / Fatal / Runtime / JS Logcat ==="
 adb logcat -d -v time > full-logcat.txt
-grep -E "(FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|com\.kallie\.app|SoLoader|UnsatisfiedLinkError|Firebase|CallKeep|LiveKit|WebRTC|ExpoUpdates|ErrorRecovery|libc|SecurityException|ActivityNotFoundException|Process ${PKG}|WIN DEATH|Force finishing activity)" full-logcat.txt | tail -n 300
+grep -E "(FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|com\.kallie\.app|SoLoader|UnsatisfiedLinkError|Firebase|RNCallKeep|LiveKit|WebRTC|ExpoUpdates|ErrorRecovery|libc|SecurityException|IllegalArgumentException|ActivityNotFoundException|MissingForegroundServiceTypeException|Process ${PKG}|WIN DEATH|Force finishing activity|Caused by:|^\s+at (io\.wazo|com\.kallie|android\.telecom))" full-logcat.txt | grep -vE "(AiAiAutofill|AppOps|RuntimeInit|uiautomator|monkey|Access denied finding property)" | tail -n 250
 
 if [ -z "${FINAL_PID}" ]; then
   echo "RESULT: CRASHED (process ${PKG} died)"
