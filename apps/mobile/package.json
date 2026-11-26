@@ -30,9 +30,14 @@
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo run:android",
+    "android": "node scripts/androidDev.mjs build",
+    "android:doctor": "node scripts/androidDev.mjs doctor",
+    "android:build": "node scripts/androidDev.mjs build",
+    "android:dev": "node scripts/androidDev.mjs dev",
+    "android:logs": "node scripts/androidDev.mjs logs",
+    "android:mirror": "node scripts/androidDev.mjs mirror",
+    "android:release-local": "node scripts/androidDev.mjs release-local",
     "ios": "expo run:ios",
-    "web": "expo start --web",
     "typecheck": "tsc --noEmit"
   },
   "private": true
