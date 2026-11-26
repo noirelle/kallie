@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -9,7 +9,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useDynamicIsland } from '../../../components/DynamicIslandBar';
 import {
   AgentVisualizerState,
   CallChatMessage,
@@ -17,7 +16,22 @@ import {
 } from '../hooks/useLiveKitCall';
 import { AgentAuraVisualizer } from './AgentAuraVisualizer';
 import { AgentChatTranscript } from './AgentChatTranscript';
-import { ChatIcon, HangupIcon, MicIcon, SendIcon, SpeakerIcon } from './CallIcons';
+import {
+  CameraIcon,
+  ChatIcon,
+  HangupIcon,
+  MicIcon,
+  ScreenShareIcon,
+  SendIcon,
+} from './CallIcons';
+
+export interface AgentControlBarControls {
+  leave?: boolean;
+  microphone?: boolean;
+  screenShare?: boolean;
+  camera?: boolean;
+  chat?: boolean;
+}
 
 interface ActiveCallViewProps {
   status: CallConnectionState;
@@ -25,57 +39,50 @@ interface ActiveCallViewProps {
   audioLevel: number;
   elapsedSeconds: number;
   isMuted: boolean;
-  isSpeakerOn: boolean;
+  isCameraOn: boolean;
+  isScreenShareOn: boolean;
   error: string | null;
   messages: CallChatMessage[];
+  controls?: AgentControlBarControls;
   onSendMessage: (text: string) => Promise<void>;
   onToggleMute: () => void;
-  onToggleSpeaker: () => void;
+  onToggleCamera: () => void;
+  onToggleScreenShare: () => void;
   onEndCall: () => void;
 }
 
-function formatDuration(totalSeconds: number): string {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
+const DEFAULT_CONTROLS: Required<AgentControlBarControls> = {
+  leave: true,
+  microphone: true,
+  screenShare: true,
+  camera: true,
+  chat: true,
+};
 
 export function ActiveCallView({
   status,
   agentState,
   audioLevel,
-  elapsedSeconds,
   isMuted,
-  isSpeakerOn,
+  isCameraOn,
+  isScreenShareOn,
   error,
   messages,
+  controls = DEFAULT_CONTROLS,
   onSendMessage,
   onToggleMute,
-  onToggleSpeaker,
+  onToggleCamera,
+  onToggleScreenShare,
   onEndCall,
 }: ActiveCallViewProps) {
   const [chatOpen, setChatOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  const { setCallInfo } = useDynamicIsland();
 
+  const activeControls = { ...DEFAULT_CONTROLS, ...controls };
   const resolvedState: AgentVisualizerState =
     status === 'connecting' ? 'connecting' : agentState;
-
-  useEffect(() => {
-    setCallInfo({
-      active: true,
-      timer: formatDuration(elapsedSeconds),
-      agentState: resolvedState,
-      audioLevel,
-    });
-  }, [audioLevel, elapsedSeconds, resolvedState, setCallInfo]);
-
-  useEffect(() => {
-    return () => {
-      setCallInfo({ active: false });
-    };
-  }, [setCallInfo]);
+  const isConnected = status === 'connected' || status === 'agent_speaking';
 
   const handleSend = async () => {
     const trimmed = draft.trim();
@@ -89,7 +96,7 @@ export function ActiveCallView({
     }
   };
 
-  const canSend = Boolean(draft.trim()) && !sending;
+  const canSend = Boolean(draft.trim()) && !sending && isConnected;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -98,13 +105,20 @@ export function ActiveCallView({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        {/* Top clearance for the Dynamic Island pill (scaled-down Aura + timer) */}
-        <View style={styles.topClearance} />
-
-        {/* Main Stage: Pure centered Aura OR borderless live transcript */}
+        {/* Main Stage: Centered Aura rises cleanly to the top when chat opens */}
         {chatOpen ? (
           <View style={styles.transcriptStage}>
-            <AgentChatTranscript messages={messages} agentState={resolvedState} />
+            <View style={styles.raisedAuraHeader}>
+              <AgentAuraVisualizer
+                state={resolvedState}
+                audioLevel={audioLevel}
+                size="sm"
+              />
+            </View>
+
+            <View style={styles.transcriptBody}>
+              <AgentChatTranscript messages={messages} agentState={resolvedState} />
+            </View>
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
           </View>
         ) : (
@@ -118,9 +132,9 @@ export function ActiveCallView({
           </View>
         )}
 
-        {/* Minimalist floating Control Bar */}
+        {/* LiveKit AgentControlBar (variant="livekit"): mic, camera, screenShare, chat, leave */}
         <View style={styles.controlDock}>
-          {chatOpen ? (
+          {chatOpen && activeControls.chat ? (
             <View style={styles.composerRow}>
               <TextInput
                 style={styles.composerInput}
@@ -149,55 +163,82 @@ export function ActiveCallView({
 
           <View style={styles.controlActions}>
             <View style={styles.leftActions}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.actionBtn,
-                  isMuted && styles.actionBtnMuted,
-                  pressed && styles.actionBtnPressed,
-                ]}
-                onPress={onToggleMute}
-                accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-              >
-                <MicIcon color={isMuted ? '#F87171' : '#FAFAFA'} muted={isMuted} />
-              </Pressable>
-
-              {Platform.OS !== 'web' ? (
+              {activeControls.microphone ? (
                 <Pressable
                   style={({ pressed }) => [
                     styles.actionBtn,
-                    isSpeakerOn && styles.actionBtnSpeakerOn,
+                    isMuted && styles.actionBtnDanger,
                     pressed && styles.actionBtnPressed,
                   ]}
-                  onPress={onToggleSpeaker}
-                  accessibilityLabel={isSpeakerOn ? 'Switch to earpiece' : 'Switch to speaker'}
+                  onPress={onToggleMute}
+                  accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
                 >
-                  <SpeakerIcon color="#FAFAFA" active={isSpeakerOn} />
+                  <MicIcon color={isMuted ? '#F87171' : '#FAFAFA'} muted={isMuted} />
                 </Pressable>
               ) : null}
 
-              <Pressable
-                style={({ pressed }) => [
-                  styles.actionBtn,
-                  chatOpen && styles.actionBtnChatOpen,
-                  pressed && styles.actionBtnPressed,
-                ]}
-                onPress={() => setChatOpen((prev) => !prev)}
-                accessibilityLabel={chatOpen ? 'Hide transcript' : 'Show transcript'}
-              >
-                <ChatIcon color={chatOpen ? '#1FD5F9' : '#FAFAFA'} />
-              </Pressable>
+              {activeControls.camera ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.actionBtn,
+                    isCameraOn && styles.actionBtnActive,
+                    pressed && styles.actionBtnPressed,
+                  ]}
+                  onPress={onToggleCamera}
+                  accessibilityLabel={isCameraOn ? 'Turn off camera' : 'Turn on camera'}
+                >
+                  <CameraIcon
+                    color={isCameraOn ? '#1FD5F9' : '#FAFAFA'}
+                    enabled={isCameraOn}
+                  />
+                </Pressable>
+              ) : null}
+
+              {activeControls.screenShare ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.actionBtn,
+                    isScreenShareOn && styles.actionBtnActive,
+                    pressed && styles.actionBtnPressed,
+                  ]}
+                  onPress={onToggleScreenShare}
+                  accessibilityLabel={
+                    isScreenShareOn ? 'Stop screen share' : 'Share screen'
+                  }
+                >
+                  <ScreenShareIcon
+                    color={isScreenShareOn ? '#1FD5F9' : '#FAFAFA'}
+                  />
+                </Pressable>
+              ) : null}
+
+              {activeControls.chat ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.actionBtn,
+                    chatOpen && styles.actionBtnActive,
+                    pressed && styles.actionBtnPressed,
+                  ]}
+                  onPress={() => setChatOpen((prev) => !prev)}
+                  accessibilityLabel={chatOpen ? 'Hide transcript' : 'Show transcript'}
+                >
+                  <ChatIcon color={chatOpen ? '#1FD5F9' : '#FAFAFA'} />
+                </Pressable>
+              ) : null}
             </View>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.endBtn,
-                pressed && styles.endBtnPressed,
-              ]}
-              onPress={onEndCall}
-              accessibilityLabel="End call"
-            >
-              <HangupIcon color="#F87171" />
-            </Pressable>
+            {activeControls.leave ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.endBtn,
+                  pressed && styles.endBtnPressed,
+                ]}
+                onPress={onEndCall}
+                accessibilityLabel="Leave call"
+              >
+                <HangupIcon color="#F87171" />
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -213,11 +254,8 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 12,
     paddingBottom: 20,
-  },
-  topClearance: {
-    height: 54,
   },
   auraStage: {
     flex: 1,
@@ -230,6 +268,18 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingBottom: 10,
   },
+  raisedAuraHeader: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 8,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  transcriptBody: {
+    flex: 1,
+    width: '100%',
+  },
   errorText: {
     color: '#F87171',
     fontSize: 13,
@@ -240,10 +290,10 @@ const styles = StyleSheet.create({
   },
   controlDock: {
     width: '100%',
-    backgroundColor: '#0A0A0C',
+    backgroundColor: '#0A0A0D',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
-    borderRadius: 28,
+    borderRadius: 31,
     padding: 10,
   },
   composerRow: {
@@ -285,37 +335,33 @@ const styles = StyleSheet.create({
   leftActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   actionBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: '#18181B',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.07)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   actionBtnPressed: {
     opacity: 0.8,
   },
-  actionBtnMuted: {
+  actionBtnDanger: {
     backgroundColor: 'rgba(239, 68, 68, 0.16)',
     borderColor: 'rgba(239, 68, 68, 0.3)',
   },
-  actionBtnSpeakerOn: {
-    backgroundColor: '#222226',
-    borderColor: 'rgba(255, 255, 255, 0.16)',
-  },
-  actionBtnChatOpen: {
+  actionBtnActive: {
     backgroundColor: 'rgba(31, 213, 249, 0.16)',
     borderColor: 'rgba(31, 213, 249, 0.42)',
   },
   endBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: 'rgba(239, 68, 68, 0.16)',
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.28)',

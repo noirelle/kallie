@@ -106,6 +106,8 @@ export function useLiveKitCall(params: {
   const [agentState, setAgentState] = useState<AgentVisualizerState>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [isScreenShareOn, setIsScreenShareOn] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [agentJoined, setAgentJoined] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -387,6 +389,38 @@ export function useLiveKitCall(params: {
     setIsMuted(nextMuted);
   }, [isMuted]);
 
+  const toggleCamera = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    const nextCamera = !isCameraOn;
+    try {
+      if (Platform.OS === 'android' && nextCamera) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          return;
+        }
+      }
+      await room.localParticipant.setCameraEnabled(nextCamera);
+      setIsCameraOn(nextCamera);
+    } catch {
+      setIsCameraOn(false);
+    }
+  }, [isCameraOn]);
+
+  const toggleScreenShare = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    const nextShare = !isScreenShareOn;
+    try {
+      await room.localParticipant.setScreenShareEnabled(nextShare);
+      setIsScreenShareOn(nextShare);
+    } catch {
+      setIsScreenShareOn(false);
+    }
+  }, [isScreenShareOn]);
+
   const toggleSpeaker = useCallback(async () => {
     const nextSpeaker = !isSpeakerOn;
     setIsSpeakerOn(nextSpeaker);
@@ -414,12 +448,16 @@ export function useLiveKitCall(params: {
     agentState,
     error,
     isMuted,
+    isCameraOn,
+    isScreenShareOn,
     isSpeakerOn,
     agentJoined,
     audioLevel,
     elapsedSeconds,
     messages,
     toggleMute,
+    toggleCamera,
+    toggleScreenShare,
     toggleSpeaker,
     sendMessage,
     endCall,

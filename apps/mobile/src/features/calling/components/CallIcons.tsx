@@ -69,6 +69,28 @@ export function SendIcon({ color }: IconProps) {
   );
 }
 
+export function CameraIcon({ color, enabled = false }: IconProps & { enabled?: boolean }) {
+  return (
+    <View style={styles.box}>
+      <View style={[styles.camBody, { borderColor: color }]} />
+      <View style={[styles.camLens, { borderRightColor: color }]} />
+      {!enabled ? <View style={[styles.slash, { backgroundColor: color }]} /> : null}
+    </View>
+  );
+}
+
+export function ScreenShareIcon({ color }: IconProps) {
+  return (
+    <View style={styles.box}>
+      <View style={[styles.screenFrame, { borderColor: color }]}>
+        <View style={[styles.screenArrowHead, { borderColor: color }]} />
+        <View style={[styles.screenArrowStem, { backgroundColor: color }]} />
+      </View>
+      <View style={[styles.screenStand, { backgroundColor: color }]} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   box: {
     width: 22,
@@ -221,5 +243,54 @@ const styles = StyleSheet.create({
     borderTopColor: 'transparent',
     borderBottomColor: 'transparent',
     marginLeft: 2,
+  },
+  camBody: {
+    width: 13,
+    height: 11,
+    borderWidth: 1.7,
+    borderRadius: 2.5,
+    position: 'absolute',
+    left: 2,
+  },
+  camLens: {
+    width: 0,
+    height: 0,
+    borderTopWidth: 4.5,
+    borderBottomWidth: 4.5,
+    borderRightWidth: 5.5,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    position: 'absolute',
+    right: 2,
+  },
+  screenFrame: {
+    width: 18,
+    height: 13,
+    borderWidth: 1.7,
+    borderRadius: 2.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+    top: 3,
+  },
+  screenArrowHead: {
+    width: 5,
+    height: 5,
+    borderTopWidth: 1.6,
+    borderLeftWidth: 1.6,
+    transform: [{ rotate: '45deg' }],
+    marginBottom: -3,
+  },
+  screenArrowStem: {
+    width: 1.6,
+    height: 6,
+    borderRadius: 1,
+  },
+  screenStand: {
+    width: 8,
+    height: 1.8,
+    borderRadius: 1,
+    position: 'absolute',
+    bottom: 2.5,
   },
 });

@@ -22,12 +22,14 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
     agentState,
     error,
     isMuted,
-    isSpeakerOn,
+    isCameraOn,
+    isScreenShareOn,
     audioLevel,
     elapsedSeconds,
     messages,
     toggleMute,
-    toggleSpeaker,
+    toggleCamera,
+    toggleScreenShare,
     sendMessage,
     endCall,
   } = useLiveKitCall({
@@ -49,12 +51,21 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
       audioLevel={audioLevel}
       elapsedSeconds={elapsedSeconds}
       isMuted={isMuted}
-      isSpeakerOn={isSpeakerOn}
+      isCameraOn={isCameraOn}
+      isScreenShareOn={isScreenShareOn}
       error={error}
       messages={messages}
+      controls={{
+        leave: true,
+        microphone: true,
+        screenShare: true,
+        camera: true,
+        chat: true,
+      }}
       onSendMessage={sendMessage}
       onToggleMute={toggleMute}
-      onToggleSpeaker={toggleSpeaker}
+      onToggleCamera={toggleCamera}
+      onToggleScreenShare={toggleScreenShare}
       onEndCall={handleEndCall}
     />
   );
