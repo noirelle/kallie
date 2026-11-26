@@ -121,18 +121,61 @@ export function useLiveKitCall(params: {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [messages, setMessages] = useState<CallChatMessage[]>([]);
 
+  const finalizedSegmentsRef = useRef<Set<string>>(new Set());
+
   const upsertMessage = useCallback(
-    (id: string, sender: 'user' | 'kallie', text: string, timestamp = Date.now()) => {
+    (
+      id: string,
+      sender: 'user' | 'kallie',
+      text: string,
+      timestamp = Date.now(),
+      isFinal = false,
+    ) => {
       const cleaned = text.trim();
       if (!cleaned) return;
+
       setMessages((prev) => {
         const idx = prev.findIndex((m) => m.id === id);
         if (idx >= 0) {
+          // Don't let an out-of-order interim chunk overwrite an already-finalized segment
+          if (finalizedSegmentsRef.current.has(id) && !isFinal) {
+            return prev;
+          }
+          if (isFinal) {
+            finalizedSegmentsRef.current.add(id);
+          }
+          if (prev[idx].text === cleaned) {
+            return prev;
+          }
           const next = [...prev];
           next[idx] = { ...next[idx], text: cleaned };
           return next;
         }
-        return [...prev, { id, sender, text: cleaned, timestamp }];
+
+        // Deduplicate if the exact same message from the same sender arrived
+        // via another channel (e.g., typed lk.chat echoed back by server) within 5s
+        const normalizedNew = cleaned.toLowerCase();
+        const recentDupIdx = prev.findIndex(
+          (m) =>
+            m.sender === sender &&
+            m.text.toLowerCase() === normalizedNew &&
+            Math.abs(m.timestamp - timestamp) < 5000,
+        );
+        if (recentDupIdx >= 0) {
+          if (isFinal) {
+            finalizedSegmentsRef.current.add(id);
+          }
+          return prev;
+        }
+
+        if (isFinal) {
+          finalizedSegmentsRef.current.add(id);
+        }
+
+        const next = [...prev, { id, sender, text: cleaned, timestamp }];
+        // Keep transcript chronologically ordered so user speech always precedes the reply it triggered
+        next.sort((a, b) => a.timestamp - b.timestamp);
+        return next;
       });
     },
     [],
@@ -167,6 +210,7 @@ export function useLiveKitCall(params: {
       setAgentReady(false);
       setAudioLevel(0);
       setElapsedSeconds(0);
+      finalizedSegmentsRef.current.clear();
       setMessages([]);
       return;
     }
@@ -259,21 +303,9 @@ export function useLiveKitCall(params: {
       }
     });
 
-    room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
-      if (cancelled) return;
-      const isLocal = participant?.identity === room.localParticipant.identity;
-      // Keep voice experience clean: never turn the user's spoken STT into chat bubbles
-      if (isLocal) return;
-      for (const seg of segments) {
-        upsertMessage(
-          `seg-${seg.id}`,
-          'kallie',
-          seg.text,
-          seg.firstReceivedTime || Date.now(),
-        );
-      }
-    });
-
+    // Use LiveKit text streams (lk.transcription + lk.chat) as the single authoritative
+    // transcript source. Do NOT also subscribe to deprecated RoomEvent.TranscriptionReceived,
+    // which emits the exact same segments a second time and causes duplicate messages.
     const handleTextStream = async (
       reader: AsyncIterable<string> & {
         info?: { id?: string; timestamp?: number; attributes?: Record<string, string> };
@@ -282,20 +314,36 @@ export function useLiveKitCall(params: {
       topic: 'lk.transcription' | 'lk.chat',
     ) => {
       if (cancelled) return;
-      const isLocal = participantInfo.identity === room.localParticipant.identity;
-      // Skip local user's voice STT streams; only render typed lk.chat messages or Kallie's replies
-      if (isLocal && topic === 'lk.transcription') return;
-      const segId =
-        reader.info?.attributes?.['lk.segment_id'] ||
+      const attrs = reader.info?.attributes;
+      const transcribedTrackId = attrs?.['lk.transcribed_track_id'];
+      const isLocalTrack =
+        Boolean(transcribedTrackId) &&
+        Array.from(room.localParticipant.audioTrackPublications.values()).some(
+          (pub) => pub.trackSid === transcribedTrackId,
+        );
+      const isLocal =
+        participantInfo.identity === room.localParticipant.identity || isLocalTrack;
+
+      // Ignore local lk.chat echoes since sendMessage already inserts typed user messages
+      if (topic === 'lk.chat' && isLocal) return;
+
+      const canonicalId =
+        attrs?.['lk.segment_id'] ||
         reader.info?.id ||
-        `${Date.now()}-${Math.random()}`;
+        `${topic}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const isFinal = attrs?.['lk.transcription_final'] === 'true' || topic === 'lk.chat';
       const ts = reader.info?.timestamp || Date.now();
+      const sender: 'user' | 'kallie' = isLocal ? 'user' : 'kallie';
+
       let accumulated = '';
       try {
         for await (const chunk of reader) {
           if (cancelled) break;
           accumulated += chunk;
-          upsertMessage(`stream-${segId}`, isLocal ? 'user' : 'kallie', accumulated, ts);
+          upsertMessage(canonicalId, sender, accumulated, ts, false);
+        }
+        if (!cancelled && accumulated.trim()) {
+          upsertMessage(canonicalId, sender, accumulated, ts, isFinal);
         }
       } catch {
         // Ignore stream close errors on disconnect
@@ -416,7 +464,7 @@ export function useLiveKitCall(params: {
       if (!trimmed || !room) return;
 
       const msgId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      upsertMessage(msgId, 'user', trimmed);
+      upsertMessage(msgId, 'user', trimmed, Date.now(), true);
       setAgentState('thinking');
       try {
         await room.localParticipant.sendText(trimmed, { topic: 'lk.chat' });
