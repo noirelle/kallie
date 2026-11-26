@@ -12,18 +12,16 @@ interface PermissionsSetupScreenProps {
 }
 
 interface PermissionToggleRowProps {
-  index: string;
   title: string;
-  description: string;
+  subtitle: string;
   enabled: boolean;
   busy: boolean;
   onPress: () => void;
 }
 
 function PermissionToggleRow({
-  index,
   title,
-  description,
+  subtitle,
   enabled,
   busy,
   onPress,
@@ -38,15 +36,9 @@ function PermissionToggleRow({
       onPress={onPress}
       disabled={busy}
     >
-      <View style={styles.rowBody}>
-        <View style={styles.rowHeader}>
-          <Text style={styles.rowIndex}>{index}</Text>
-          <Text style={[styles.rowStatus, enabled && styles.rowStatusEnabled]}>
-            {enabled ? 'ALLOWED' : 'OFF'}
-          </Text>
-        </View>
+      <View style={styles.rowText}>
         <Text style={styles.rowTitle}>{title}</Text>
-        <Text style={styles.rowDescription}>{description}</Text>
+        <Text style={styles.rowSubtitle}>{subtitle}</Text>
       </View>
 
       <View style={[styles.switchTrack, enabled && styles.switchTrackOn]}>
@@ -67,36 +59,28 @@ export function PermissionsSetupScreen({
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.topMark}>
+      <View style={styles.main}>
         <Image
           source={require('../../../../assets/icon.png')}
           style={styles.logo}
           resizeMode="contain"
         />
-      </View>
 
-      <View style={styles.main}>
-        <Text style={styles.eyebrow}>BEFORE YOU START</Text>
-        <Text style={styles.heading}>Enable call permissions.</Text>
-        <Text style={styles.subtitle}>
-          Turn on notifications and microphone so Kallie can ring your device on schedule and hear
-          you immediately.
-        </Text>
+        <Text style={styles.heading}>Allow permissions</Text>
+        <Text style={styles.subtitle}>So Kallie can call and hear you.</Text>
 
         <View style={styles.list}>
           <PermissionToggleRow
-            index="01 / ALERTS"
             title="Notifications"
-            description="Required to wake your phone for scheduled callbacks and reminders."
+            subtitle="Incoming calls and reminders"
             enabled={permissions.notifications}
             busy={busyKey === 'notifications'}
             onPress={onToggleNotifications}
           />
 
           <PermissionToggleRow
-            index="02 / VOICE"
             title="Microphone"
-            description="Required for real-time voice conversations with Kallie."
+            subtitle="Live voice calls"
             enabled={permissions.microphone}
             busy={busyKey === 'microphone'}
             onPress={onToggleMicrophone}
@@ -113,15 +97,9 @@ export function PermissionsSetupScreen({
           onPress={onContinue}
         >
           <Text style={styles.continueBtnText}>
-            {ready ? 'START USING KALLIE' : 'CONTINUE'}
+            {ready ? 'Get started' : 'Continue'}
           </Text>
         </Pressable>
-
-        {!ready ? (
-          <Text style={styles.hint}>
-            You can enable these anytime from Android Settings.
-          </Text>
-        ) : null}
       </View>
     </SafeAreaView>
   );
@@ -132,117 +110,89 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000000',
     justifyContent: 'space-between',
-    paddingHorizontal: 28,
-    paddingTop: 18,
+    paddingHorizontal: 24,
+    paddingTop: 32,
     paddingBottom: 24,
   },
-  topMark: {
-    alignItems: 'flex-start',
-  },
-  logo: {
-    width: 40,
-    height: 40,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.16)',
-  },
   main: {
+    flex: 1,
+    justifyContent: 'center',
     width: '100%',
-    maxWidth: 420,
+    maxWidth: 380,
     alignSelf: 'center',
   },
-  eyebrow: {
-    color: '#71717A',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2.4,
-    marginBottom: 10,
+  logo: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignSelf: 'center',
+    marginBottom: 22,
   },
   heading: {
     color: '#FFFFFF',
-    fontSize: 32,
-    fontWeight: '700',
-    letterSpacing: -0.7,
-    lineHeight: 38,
+    fontSize: 24,
+    fontWeight: '600',
+    letterSpacing: -0.4,
+    textAlign: 'center',
   },
   subtitle: {
-    color: '#A1A1AA',
+    color: '#71717A',
     fontSize: 14,
-    lineHeight: 21,
-    marginTop: 12,
+    textAlign: 'center',
+    marginTop: 6,
     marginBottom: 28,
   },
   list: {
-    gap: 14,
+    gap: 12,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 16,
+    backgroundColor: '#111111',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.16)',
-    backgroundColor: '#050505',
-    padding: 18,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   rowEnabled: {
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-    backgroundColor: '#0A0A0A',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: '#151515',
   },
   rowPressed: {
-    backgroundColor: '#111111',
+    backgroundColor: '#1A1A1A',
   },
-  rowBody: {
+  rowText: {
     flex: 1,
-  },
-  rowHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 6,
-  },
-  rowIndex: {
-    color: '#71717A',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.6,
-  },
-  rowStatus: {
-    color: '#52525B',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.4,
-  },
-  rowStatusEnabled: {
-    color: '#FFFFFF',
+    gap: 2,
   },
   rowTitle: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: '600',
   },
-  rowDescription: {
-    color: '#A1A1AA',
-    fontSize: 12,
-    lineHeight: 17,
+  rowSubtitle: {
+    color: '#71717A',
+    fontSize: 13,
   },
   switchTrack: {
     width: 48,
-    height: 26,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-    backgroundColor: '#000000',
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: '#27272A',
     padding: 3,
     justifyContent: 'center',
   },
   switchTrackOn: {
-    borderColor: '#FFFFFF',
     backgroundColor: '#FFFFFF',
   },
   switchThumb: {
-    width: 18,
-    height: 18,
-    backgroundColor: '#52525B',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#71717A',
     alignSelf: 'flex-start',
   },
   switchThumbOn: {
@@ -251,13 +201,13 @@ const styles = StyleSheet.create({
   },
   footer: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: 380,
     alignSelf: 'center',
-    gap: 12,
   },
   continueBtn: {
     backgroundColor: '#FFFFFF',
-    paddingVertical: 16,
+    borderRadius: 999,
+    height: 52,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -266,13 +216,7 @@ const styles = StyleSheet.create({
   },
   continueBtnText: {
     color: '#000000',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-  hint: {
-    color: '#52525B',
-    fontSize: 11,
-    textAlign: 'center',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

@@ -82,10 +82,10 @@ export default function HomeScreen() {
             style={styles.headerLogo}
             resizeMode="contain"
           />
-          <Text style={styles.brand}>KALLIE</Text>
+          <Text style={styles.brand}>Kallie</Text>
         </View>
-        <Pressable onPress={signOut}>
-          <Text style={styles.signOut}>SIGN OUT</Text>
+        <Pressable onPress={signOut} hitSlop={8}>
+          <Text style={styles.signOut}>Sign out</Text>
         </Pressable>
       </View>
 
@@ -95,21 +95,25 @@ export default function HomeScreen() {
           style={styles.heroLogo}
           resizeMode="contain"
         />
-        <Text style={styles.heading}>Talk live with Kallie</Text>
+        <Text style={styles.heading}>Talk with Kallie</Text>
 
         <Pressable
-          style={[styles.startBtn, starting && styles.startBtnDisabled]}
+          style={({ pressed }) => [
+            styles.startBtn,
+            starting && styles.startBtnDisabled,
+            pressed && !starting && styles.startBtnPressed,
+          ]}
           onPress={handleStartCall}
           disabled={starting}
         >
-          <Text style={styles.startBtnText}>{starting ? 'STARTING...' : 'START CALL'}</Text>
+          <Text style={styles.startBtnText}>{starting ? 'Starting...' : 'Start call'}</Text>
         </Pressable>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         {upcoming.length > 0 ? (
           <View style={styles.upcomingBlock}>
-            <Text style={styles.upcomingLabel}>UPCOMING FROM KALLIE</Text>
+            <Text style={styles.upcomingLabel}>Upcoming</Text>
             {upcoming.map((item) => (
               <View key={item.id} style={styles.reminderPill}>
                 <Text style={styles.reminderTitle} numberOfLines={1}>
@@ -130,8 +134,7 @@ export default function HomeScreen() {
       </View>
 
       <Text style={styles.footerHint}>
-        Just ask by voice — &ldquo;Call me back in 2 minutes&rdquo; or &ldquo;Remind me tomorrow at
-        9 AM&rdquo;.
+        Ask by voice to schedule callbacks or reminders.
       </Text>
     </SafeAreaView>
   );
@@ -153,15 +156,13 @@ const styles = StyleSheet.create({
   },
   brand: {
     color: '#FAFAFA',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.5,
+    fontSize: 15,
+    fontWeight: '600',
   },
   signOut: {
     color: '#A1A1AA',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 1.2,
+    fontSize: 14,
+    fontWeight: '500',
   },
   center: {
     alignItems: 'center',
@@ -176,39 +177,43 @@ const styles = StyleSheet.create({
   headerLogo: {
     width: 24,
     height: 24,
-    borderRadius: 5,
+    borderRadius: 6,
   },
   heroLogo: {
-    width: 84,
-    height: 84,
-    borderRadius: 20,
-    marginBottom: 16,
+    width: 72,
+    height: 72,
+    borderRadius: 18,
+    marginBottom: 18,
   },
   heading: {
     color: '#FAFAFA',
-    fontSize: 16,
+    fontSize: 22,
     fontWeight: '600',
+    letterSpacing: -0.3,
   },
   startBtn: {
     marginTop: 24,
-    width: 240,
-    backgroundColor: '#1FD5F9',
-    paddingVertical: 15,
+    width: 220,
+    height: 52,
+    backgroundColor: '#FFFFFF',
     borderRadius: 999,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startBtnPressed: {
+    backgroundColor: '#E4E4E7',
   },
   startBtnDisabled: {
     opacity: 0.6,
   },
   startBtnText: {
     color: '#000000',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1.2,
+    fontSize: 15,
+    fontWeight: '600',
   },
   errorText: {
     color: '#F87171',
-    fontSize: 12,
+    fontSize: 13,
     marginTop: 14,
     textAlign: 'center',
   },
@@ -220,9 +225,8 @@ const styles = StyleSheet.create({
   },
   upcomingLabel: {
     color: '#71717A',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.4,
+    fontSize: 12,
+    fontWeight: '500',
     textAlign: 'center',
     marginBottom: 2,
   },

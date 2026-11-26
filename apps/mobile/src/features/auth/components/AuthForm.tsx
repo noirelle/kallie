@@ -41,7 +41,7 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
     }
 
     if (!email.trim() || password.length < 6) {
-      setError('Enter a valid email and a password of at least 6 characters.');
+      setError('Enter your email and a password of at least 6 characters.');
       return;
     }
 
@@ -61,7 +61,7 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
         if (signUpError) {
           setError(signUpError.message);
         } else if (!data.session) {
-          setInfo('Check your inbox to confirm your account, then sign in.');
+          setInfo('Check your email to confirm your account.');
         }
       }
     } finally {
@@ -80,86 +80,61 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.topMark}>
+          <View style={styles.main}>
             <Image
               source={require('../../../../assets/icon.png')}
               style={styles.logo}
               resizeMode="contain"
             />
-          </View>
 
-          <View style={styles.content}>
-            <Text style={styles.eyebrow}>KALLIE / VOICE</Text>
             <Text style={styles.heading}>
-              {isLogin ? 'Sign in to\nKallie.' : 'Create your\naccount.'}
-            </Text>
-            <Text style={styles.subtitle}>
-              {isLogin
-                ? 'Your AI voice companion that calls you back on schedule.'
-                : 'Start talking live and scheduling voice callbacks.'}
+              {isLogin ? 'Sign in to Kallie' : 'Create account'}
             </Text>
 
             <View style={styles.form}>
-              <View style={styles.fieldGroup}>
-                <Text style={styles.label}>EMAIL</Text>
-                <TextInput
-                  style={[
-                    styles.input,
-                    focusedField === 'email' && styles.inputFocused,
-                  ]}
-                  value={email}
-                  onChangeText={setEmail}
-                  onFocus={() => setFocusedField('email')}
-                  onBlur={() => setFocusedField(null)}
-                  placeholder="name@domain.com"
-                  placeholderTextColor="#52525B"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                  returnKeyType="next"
-                />
-              </View>
+              <TextInput
+                style={[styles.pillInput, focusedField === 'email' && styles.pillInputFocused]}
+                value={email}
+                onChangeText={setEmail}
+                onFocus={() => setFocusedField('email')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="Email"
+                placeholderTextColor="#71717A"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                returnKeyType="next"
+              />
 
-              <View style={styles.fieldGroup}>
-                <View style={styles.labelRow}>
-                  <Text style={styles.label}>PASSWORD</Text>
-                  <Pressable
-                    onPress={() => setShowPassword((prev) => !prev)}
-                    hitSlop={8}
-                  >
-                    <Text style={styles.toggleSecret}>
-                      {showPassword ? 'HIDE' : 'SHOW'}
-                    </Text>
-                  </Pressable>
-                </View>
+              <View
+                style={[
+                  styles.passwordWrap,
+                  focusedField === 'password' && styles.pillInputFocused,
+                ]}
+              >
                 <TextInput
-                  style={[
-                    styles.input,
-                    focusedField === 'password' && styles.inputFocused,
-                  ]}
+                  style={styles.passwordInput}
                   value={password}
                   onChangeText={setPassword}
                   onFocus={() => setFocusedField('password')}
                   onBlur={() => setFocusedField(null)}
-                  placeholder="Minimum 6 characters"
-                  placeholderTextColor="#52525B"
+                  placeholder="Password"
+                  placeholderTextColor="#71717A"
                   secureTextEntry={!showPassword}
                   returnKeyType="done"
                   onSubmitEditing={handleSubmit}
                 />
+                <Pressable
+                  onPress={() => setShowPassword((prev) => !prev)}
+                  hitSlop={10}
+                  style={styles.showBtn}
+                >
+                  <Text style={styles.showBtnText}>{showPassword ? 'Hide' : 'Show'}</Text>
+                </Pressable>
               </View>
 
-              {error ? (
-                <View style={styles.feedbackBoxError}>
-                  <Text style={styles.errorText}>{error}</Text>
-                </View>
-              ) : null}
-
-              {info ? (
-                <View style={styles.feedbackBoxInfo}>
-                  <Text style={styles.infoText}>{info}</Text>
-                </View>
-              ) : null}
+              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+              {info ? <Text style={styles.infoText}>{info}</Text> : null}
 
               <Pressable
                 style={({ pressed }) => [
@@ -174,32 +149,24 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
                   <ActivityIndicator color="#000000" size="small" />
                 ) : (
                   <Text style={styles.primaryBtnText}>
-                    {isLogin ? 'SIGN IN' : 'CREATE ACCOUNT'}
+                    {isLogin ? 'Log in' : 'Sign up'}
                   </Text>
                 )}
-              </Pressable>
-
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>OR</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.secondaryBtn,
-                  pressed && styles.secondaryBtnPressed,
-                ]}
-                onPress={onSwitchMode}
-              >
-                <Text style={styles.secondaryBtnText}>
-                  {isLogin ? 'CREATE AN ACCOUNT' : 'SIGN IN INSTEAD'}
-                </Text>
               </Pressable>
             </View>
           </View>
 
-          <Text style={styles.footerText}>PURE DARK · VOICE FIRST</Text>
+          <Pressable
+            style={({ pressed }) => [
+              styles.secondaryBtn,
+              pressed && styles.secondaryBtnPressed,
+            ]}
+            onPress={onSwitchMode}
+          >
+            <Text style={styles.secondaryBtnText}>
+              {isLogin ? 'Create new account' : 'Already have an account? Log in'}
+            </Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -217,109 +184,92 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'space-between',
-    paddingHorizontal: 28,
-    paddingTop: 18,
+    paddingHorizontal: 24,
+    paddingTop: 32,
     paddingBottom: 24,
   },
-  topMark: {
-    alignItems: 'flex-start',
-    marginBottom: 24,
-  },
-  logo: {
-    width: 40,
-    height: 40,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.16)',
-  },
-  content: {
+  main: {
+    flex: 1,
+    justifyContent: 'center',
     width: '100%',
-    maxWidth: 420,
+    maxWidth: 380,
     alignSelf: 'center',
   },
-  eyebrow: {
-    color: '#71717A',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2.4,
-    marginBottom: 10,
+  logo: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignSelf: 'center',
+    marginBottom: 22,
   },
   heading: {
     color: '#FFFFFF',
-    fontSize: 34,
-    fontWeight: '700',
-    letterSpacing: -0.8,
-    lineHeight: 40,
-  },
-  subtitle: {
-    color: '#A1A1AA',
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 12,
-    marginBottom: 32,
+    fontSize: 24,
+    fontWeight: '600',
+    letterSpacing: -0.4,
+    textAlign: 'center',
+    marginBottom: 28,
   },
   form: {
-    gap: 18,
+    gap: 12,
   },
-  fieldGroup: {
-    gap: 8,
-  },
-  labelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  label: {
-    color: '#71717A',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.8,
-  },
-  toggleSecret: {
-    color: '#A1A1AA',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-  },
-  input: {
-    backgroundColor: '#050505',
+  pillInput: {
+    backgroundColor: '#111111',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    height: 52,
     color: '#FFFFFF',
     fontSize: 15,
   },
-  inputFocused: {
-    borderColor: '#FFFFFF',
-    backgroundColor: '#0A0A0A',
+  passwordWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#111111',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 999,
+    paddingLeft: 20,
+    paddingRight: 16,
+    height: 52,
   },
-  feedbackBoxError: {
-    borderLeftWidth: 2,
-    borderLeftColor: '#EF4444',
-    backgroundColor: '#120505',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+  passwordInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 15,
+    height: '100%',
+  },
+  pillInputFocused: {
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+    backgroundColor: '#161616',
+  },
+  showBtn: {
+    paddingLeft: 10,
+  },
+  showBtnText: {
+    color: '#A1A1AA',
+    fontSize: 13,
+    fontWeight: '500',
   },
   errorText: {
-    color: '#FCA5A5',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  feedbackBoxInfo: {
-    borderLeftWidth: 2,
-    borderLeftColor: '#FFFFFF',
-    backgroundColor: '#0A0A0A',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    color: '#F87171',
+    fontSize: 13,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+    marginTop: 2,
   },
   infoText: {
     color: '#E4E4E7',
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 13,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+    marginTop: 2,
   },
   primaryBtn: {
     backgroundColor: '#FFFFFF',
-    paddingVertical: 16,
+    borderRadius: 999,
+    height: 52,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 6,
@@ -332,51 +282,27 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: {
     color: '#000000',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginVertical: 2,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  dividerText: {
-    color: '#52525B',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2,
+    fontSize: 15,
+    fontWeight: '600',
   },
   secondaryBtn: {
+    width: '100%',
+    maxWidth: 380,
+    alignSelf: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.24)',
-    backgroundColor: '#000000',
-    paddingVertical: 15,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    borderRadius: 999,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 24,
   },
   secondaryBtnPressed: {
-    borderColor: '#FFFFFF',
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#111111',
   },
   secondaryBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.8,
-  },
-  footerText: {
-    color: '#3F3F46',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2.2,
-    textAlign: 'center',
-    marginTop: 32,
+    color: '#E4E4E7',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
