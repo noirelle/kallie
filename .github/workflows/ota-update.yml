@@ -33,5 +33,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: Publish OTA update to production branch
-        run: eas update --branch production --message "${{ github.event.head_commit.message }}" --non-interactive
+      - name: Publish OTA update to preview and production branches
+        run: |
+          eas update --branch preview --message "${{ github.event.head_commit.message }}" --non-interactive
+          eas update --branch production --message "${{ github.event.head_commit.message }}" --non-interactive

@@ -14,11 +14,25 @@
       "android": {
         "buildType": "apk"
       },
-      "channel": "preview"
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://jarngfflviwytnwvznps.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_j3oBK4qkMK_BY32hOYsw2A_FeN7-M0H",
+        "EXPO_PUBLIC_API_URL": "https://kallie.nozorin.com/api",
+        "EXPO_PUBLIC_GITHUB_REPO": "noirelle/kallie",
+        "EXPO_ENABLE_ANDROID_FCM": "true"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://jarngfflviwytnwvznps.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_j3oBK4qkMK_BY32hOYsw2A_FeN7-M0H",
+        "EXPO_PUBLIC_API_URL": "https://kallie.nozorin.com/api",
+        "EXPO_PUBLIC_GITHUB_REPO": "noirelle/kallie",
+        "EXPO_ENABLE_ANDROID_FCM": "true"
+      }
     }
   }
 }

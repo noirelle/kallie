@@ -47,7 +47,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           ]
         : []),
     ],
-    ...(enableAndroidFcm ? { googleServicesFile: './google-services.json' } : {}),
+    ...(enableAndroidFcm
+      ? { googleServicesFile: process.env.GOOGLE_SERVICES_JSON || './google-services.json' }
+      : {}),
   },
   web: {
     bundler: 'metro',
