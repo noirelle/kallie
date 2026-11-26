@@ -36,13 +36,14 @@ jobs:
             gradle-${{ runner.os }}-
 
       - name: Decode google-services.json for Android FCM
-        if: ${{ secrets.GOOGLE_SERVICES_JSON_B64 != '' }}
         working-directory: apps/mobile
         env:
           GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
         run: |
-          echo "$GOOGLE_SERVICES_JSON_B64" | base64 -d > google-services.json
-          test -s google-services.json
+          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
+            echo "$GOOGLE_SERVICES_JSON_B64" | base64 -d > google-services.json
+            test -s google-services.json
+          fi
 
       - name: Install mobile dependencies
         working-directory: apps/mobile
