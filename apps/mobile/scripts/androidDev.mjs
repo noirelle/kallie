@@ -189,13 +189,15 @@ async function cmdDoctor() {
 
 async function cmdBuild() {
   const env = buildEnv({ EXPO_ENABLE_ANDROID_FCM: 'true' });
+  probe('adb', ['reverse', 'tcp:8081', 'tcp:8081'], env);
   const code = await runCommand('npx', ['expo', 'run:android'], { env });
   process.exit(code);
 }
 
 async function cmdDev() {
   const env = buildEnv({ EXPO_ENABLE_ANDROID_FCM: 'true' });
-  const code = await runCommand('npx', ['expo', 'start', '--dev-client'], { env });
+  probe('adb', ['reverse', 'tcp:8081', 'tcp:8081'], env);
+  const code = await runCommand('npx', ['expo', 'start', '--android'], { env });
   process.exit(code);
 }
 
