@@ -4,6 +4,22 @@ Kallie is a voice-first AI calling assistant built with LiveKit, Gemini Live API
 
 ---
 
+## Download and Access
+
+| Platform | Access |
+| --- | --- |
+| **Web App** | [https://kallie.nozorin.com](https://kallie.nozorin.com) |
+| **Android App (APK)** | [Download Latest Release](https://github.com/noirelle/kallie/releases/latest) |
+| **All Releases** | [GitHub Releases](https://github.com/noirelle/kallie/releases) |
+
+### Scan to Download Android APK
+
+<img src="./docs/assets/android-download-qr.svg" alt="Scan to download Kallie Android APK from GitHub Releases" width="180" />
+
+Scan the QR code with your Android camera to open the latest release and install the `.apk`. Future UI and JavaScript updates are delivered automatically over the air via EAS Update; native binary updates prompt inside the app via GitHub Releases.
+
+---
+
 ## Architecture
 
 ```text
