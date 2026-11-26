@@ -3,7 +3,7 @@
   <h1>Kallie</h1>
   <p><strong>Voice-first AI calling assistant powered by LiveKit, Gemini Live API, NestJS, Supabase, Next.js, and Expo.</strong></p>
   <p>
-    <a href="https://kallie.nozorin.com"><img src="https://img.shields.io/badge/Web_App-kallie.nozorin.com-000000?style=for-the-badge" alt="Web App" /></a>
+    <a href="https://kallie.nozorin.com"><img src="https://img.shields.io/badge/Website-kallie.nozorin.com-000000?style=for-the-badge" alt="Website" /></a>
     <a href="https://github.com/noirelle/kallie/releases/latest"><img src="https://img.shields.io/badge/Android_APK-Latest_Release-111111?style=for-the-badge" alt="Android APK" /></a>
     <a href="https://github.com/noirelle/kallie/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/noirelle/kallie/ci.yml?branch=main&style=for-the-badge&label=CI&color=111111" alt="CI Status" /></a>
   </p>
@@ -24,7 +24,7 @@ Kallie replaces traditional call-scheduling forms with natural voice interaction
     <td valign="middle" width="68%">
       <h3>Get Kallie</h3>
       <ul>
-        <li><strong>Web Client:</strong> <a href="https://kallie.nozorin.com">https://kallie.nozorin.com</a></li>
+        <li><strong>Website:</strong> <a href="https://kallie.nozorin.com">https://kallie.nozorin.com</a></li>
         <li><strong>Android APK:</strong> <a href="https://github.com/noirelle/kallie/releases/latest">Download Latest Release</a></li>
         <li><strong>Release History:</strong> <a href="https://github.com/noirelle/kallie/releases">GitHub Releases</a></li>
       </ul>
@@ -49,7 +49,7 @@ Kallie replaces traditional call-scheduling forms with natural voice interaction
 ```text
 kallie/
 ├── apps/
-│   ├── web/            # Next.js client based on LiveKit agent-starter-react (pure-black dark theme)
+│   ├── web/            # Next.js pure-dark scroll-driven promotional & Android download site
 │   └── mobile/         # Expo React Native client (Android / iOS, native WebRTC, FCM + CallKeep, OTA updates)
 ├── services/
 │   ├── api/            # NestJS API, 15s atomic due-call scheduler, LiveKit dispatch, FCM & APNs push
@@ -77,7 +77,7 @@ kallie/
 
 | Layer | Technologies |
 | --- | --- |
-| Web Client | Next.js 15, Tailwind CSS, `@livekit/components-react`, LiveKit Agents UI |
+| Website | Next.js 15, Tailwind CSS, Motion (scroll-driven landing page) |
 | Mobile Client | Expo (React Native, TypeScript), Expo Router, `@livekit/react-native`, `react-native-callkeep`, `@react-native-firebase/messaging`, `expo-updates` |
 | Backend API & Scheduler | NestJS, `@nestjs/schedule`, `livekit-server-sdk`, `firebase-admin`, Node.js HTTP/2 APNs |
 | Voice AI Agent | `@livekit/agents`, `@livekit/agents-plugin-google` (Gemini Live API) |

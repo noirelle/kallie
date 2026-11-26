@@ -52,10 +52,10 @@ export default function RootLayout({ children }: RootLayoutProps) {
       )}
     >
       <head>
-        <title>Kallie — AI Voice Assistant</title>
+        <title>Kallie — AI Voice Companion for Android</title>
         <meta
           name="description"
-          content="Kallie — AI voice assistant with voice-driven callbacks and reminders, built with LiveKit"
+          content="Kallie is a minimalist AI voice companion for Android that calls you back on your schedule."
         />
       </head>
       <body className="bg-background text-foreground overflow-x-hidden">
