@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { KallieAvatarBadge } from '../../../components/KallieAvatarBadge';
+import { AgentAudioVisualizerAura } from '../../../components/AgentAudioVisualizerAura';
 import { isSupabaseConfigured } from '../../../lib/env';
 import { supabase } from '../../../lib/supabaseClient';
 
@@ -82,7 +82,12 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
         >
           <View style={styles.main}>
             <View style={styles.heroWrap}>
-              <KallieAvatarBadge size="md" />
+              <AgentAudioVisualizerAura
+                size="md"
+                state="listening"
+                audioLevel={0.34}
+                cycleDemoColors
+              />
             </View>
 
             <Text style={styles.heading}>
@@ -203,7 +208,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   heroWrap: {
-    marginBottom: 26,
+    marginBottom: 8,
   },
   heading: {
     color: '#FFFFFF',

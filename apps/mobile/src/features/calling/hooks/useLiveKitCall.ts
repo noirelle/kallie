@@ -1,6 +1,7 @@
-import { Room, RoomEvent, Track } from 'livekit-client';
+import { ConnectionQuality, Room, RoomEvent, Track } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
+import { AuraConnectionStatus } from '../../../components/auraTheme';
 import { apiClient } from '../../../lib/apiClient';
 import { clearPendingCallConnection } from '../../../lib/callSessionStore';
 
@@ -117,6 +118,9 @@ export function useLiveKitCall(params: {
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [agentJoined, setAgentJoined] = useState(false);
   const [agentReady, setAgentReady] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<AuraConnectionStatus>(
+    isEnabled ? 'connecting' : 'idle',
+  );
   const [audioLevel, setAudioLevel] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [messages, setMessages] = useState<CallChatMessage[]>([]);
@@ -208,6 +212,7 @@ export function useLiveKitCall(params: {
       setIsScreenShareOn(false);
       setAgentJoined(false);
       setAgentReady(false);
+      setConnectionStatus('idle');
       setAudioLevel(0);
       setElapsedSeconds(0);
       finalizedSegmentsRef.current.clear();
@@ -218,6 +223,7 @@ export function useLiveKitCall(params: {
     if (!params.livekitUrl || !params.token) {
       setStatus('connecting');
       setAgentState('connecting');
+      setConnectionStatus('connecting');
       setError(null);
       return;
     }
@@ -227,6 +233,7 @@ export function useLiveKitCall(params: {
     endedManuallyRef.current = false;
     setStatus('connecting');
     setAgentState('connecting');
+    setConnectionStatus('connecting');
     setError(null);
 
     registerLiveKitGlobals();
@@ -244,6 +251,9 @@ export function useLiveKitCall(params: {
         setAgentState(parsed);
         if (parsed === 'listening' || parsed === 'thinking' || parsed === 'speaking') {
           setAgentReady(true);
+          setConnectionStatus((prev) =>
+            prev === 'weak' || prev === 'disconnected' ? prev : 'connected',
+          );
         }
         if (parsed === 'speaking') {
           setStatus('agent_speaking');
@@ -293,7 +303,37 @@ export function useLiveKitCall(params: {
         setAgentJoined(true);
         if (track.kind === Track.Kind.Audio) {
           setAgentReady(true);
+          setConnectionStatus((prev) =>
+            prev === 'weak' || prev === 'disconnected' ? prev : 'connected',
+          );
         }
+      }
+    });
+
+    room.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+      if (cancelled) return;
+      if (participant.identity !== room.localParticipant.identity) return;
+      if (quality === ConnectionQuality.Lost) {
+        setConnectionStatus('disconnected');
+      } else if (quality === ConnectionQuality.Poor) {
+        setConnectionStatus('weak');
+      } else if (
+        (quality === ConnectionQuality.Good || quality === ConnectionQuality.Excellent) &&
+        wasConnectedRef.current
+      ) {
+        setConnectionStatus('connected');
+      }
+    });
+
+    room.on(RoomEvent.Reconnecting, () => {
+      if (!cancelled) {
+        setConnectionStatus('weak');
+      }
+    });
+
+    room.on(RoomEvent.Reconnected, () => {
+      if (!cancelled) {
+        setConnectionStatus('connected');
       }
     });
 
@@ -364,6 +404,7 @@ export function useLiveKitCall(params: {
     room.on(RoomEvent.Disconnected, () => {
       if (cancelled) return;
       setStatus('disconnected');
+      setConnectionStatus(endedManuallyRef.current ? 'idle' : 'disconnected');
       // Only auto-leave screen if the call actually connected before disconnecting
       if (wasConnectedRef.current && !endedManuallyRef.current) {
         clearPendingCallConnection(params.sessionId);
@@ -433,6 +474,7 @@ export function useLiveKitCall(params: {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to connect to Kallie');
           setStatus('error');
+          setConnectionStatus('disconnected');
         }
       }
     };
@@ -536,6 +578,7 @@ export function useLiveKitCall(params: {
     setStatus('disconnected');
     setAgentState('idle');
     setAgentReady(false);
+    setConnectionStatus('idle');
 
     if (room) {
       void room.disconnect().catch(() => {});
@@ -556,6 +599,7 @@ export function useLiveKitCall(params: {
     isSpeakerOn,
     agentJoined,
     agentReady,
+    connectionStatus,
     audioLevel,
     elapsedSeconds,
     messages,

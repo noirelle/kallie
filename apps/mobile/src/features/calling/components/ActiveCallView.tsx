@@ -10,16 +10,16 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  UIManager,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AgentAudioVisualizerAura } from '../../../components/AgentAudioVisualizerAura';
+import { AuraConnectionStatus } from '../../../components/auraTheme';
 import {
   AgentVisualizerState,
   CallChatMessage,
   CallConnectionState,
 } from '../hooks/useLiveKitCall';
-import { AgentAuraVisualizer } from './AgentAuraVisualizer';
 import { AgentChatTranscript } from './AgentChatTranscript';
 import {
   CameraIcon,
@@ -29,13 +29,6 @@ import {
   ScreenShareIcon,
   SendIcon,
 } from './CallIcons';
-
-if (
-  Platform.OS === 'android' &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export interface AgentControlBarControls {
   leave?: boolean;
@@ -50,6 +43,7 @@ interface ActiveCallViewProps {
   isCallReady?: boolean;
   status: CallConnectionState;
   agentState: AgentVisualizerState;
+  connectionStatus?: AuraConnectionStatus;
   audioLevel: number;
   elapsedSeconds: number;
   isMuted: boolean;
@@ -79,6 +73,7 @@ export function ActiveCallView({
   isCallReady = true,
   status,
   agentState,
+  connectionStatus = 'idle',
   audioLevel,
   isMuted,
   isCameraOn = false,
@@ -100,7 +95,7 @@ export function ActiveCallView({
 
   // Separate smooth GPU animations:
   // - promptAnim fades out immediately on tap (0ms latency)
-  // - dockAnim glides in only once the AI agent is actually connected & ready
+  // - dockAnim glides in once the AI agent is actually connected & ready
   const promptAnim = useRef(new Animated.Value(isSessionActive ? 0 : 1)).current;
   const dockAnim = useRef(
     new Animated.Value(isSessionActive && isCallReady ? 1 : 0),
@@ -152,6 +147,17 @@ export function ActiveCallView({
     : !isCallReady || status === 'connecting'
       ? 'connecting'
       : agentState;
+
+  const effectiveConnectionStatus: AuraConnectionStatus = error
+    ? 'disconnected'
+    : !isSessionActive
+      ? 'idle'
+      : connectionStatus === 'weak' || connectionStatus === 'disconnected'
+        ? connectionStatus
+        : !isCallReady || status === 'connecting'
+          ? 'connecting'
+          : 'connected';
+
   const isConnected = status === 'connected' || status === 'agent_speaking';
 
   const handleToggleChat = () => {
@@ -187,14 +193,10 @@ export function ActiveCallView({
 
   const canSend = Boolean(draft.trim()) && !sending && isConnected;
 
-  const promptOpacity = promptAnim;
-
   const promptTranslateY = promptAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [8, 0],
   });
-
-  const dockOpacity = dockAnim;
 
   const dockTranslateY = dockAnim.interpolate({
     inputRange: [0, 1],
@@ -214,7 +216,7 @@ export function ActiveCallView({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        {/* Main Stage: Single persistent Aura transitions seamlessly between idle, active, and raised-chat */}
+        {/* Main Stage: Perfectly centered, seamless unclipped Aura (no borders or dividers) */}
         <View style={[styles.stage, chatOpen && styles.stageTranscript]}>
           <Pressable
             onPress={!isSessionActive ? onStartCall : !isCallReady ? onEndCall : undefined}
@@ -231,10 +233,13 @@ export function ActiveCallView({
                   : 'Kallie Aura visualizer'
             }
           >
-            <AgentAuraVisualizer
+            <AgentAudioVisualizerAura
+              size={chatOpen ? 'sm' : 'xl'}
+              connectionStatus={effectiveConnectionStatus}
               state={resolvedState}
-              audioLevel={isSessionActive ? audioLevel : 0.1}
-              size={chatOpen ? 'sm' : 'lg'}
+              audioLevel={isSessionActive ? audioLevel : 0.14}
+              colorShift={0.3}
+              themeMode="dark"
             />
           </Pressable>
 
@@ -243,7 +248,7 @@ export function ActiveCallView({
               style={[
                 styles.promptWrap,
                 {
-                  opacity: promptOpacity,
+                  opacity: promptAnim,
                   transform: [{ translateY: promptTranslateY }],
                 },
               ]}
@@ -262,12 +267,13 @@ export function ActiveCallView({
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
 
-        {/* Smoothly animated LiveKit Control Bar */}
+        {/* Smoothly animated LiveKit Control Bar (floats cleanly at bottom without offsetting centered Aura) */}
         <Animated.View
           style={[
             styles.controlDock,
+            !chatOpen && styles.controlDockFloating,
             {
-              opacity: dockOpacity,
+              opacity: dockAnim,
               transform: [{ translateY: dockTranslateY }],
             },
           ]}
@@ -411,10 +417,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   auraPressed: {
-    transform: [{ scale: 0.95 }],
+    transform: [{ scale: 0.96 }],
   },
   promptWrap: {
-    marginTop: 22,
+    marginTop: 6,
   },
   promptText: {
     color: '#71717A',
@@ -427,10 +433,8 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 8,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    paddingTop: 4,
+    paddingBottom: 6,
   },
   transcriptBody: {
     flex: 1,
@@ -439,7 +443,7 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#F87171',
     fontSize: 13,
-    marginTop: 16,
+    marginTop: 14,
     textAlign: 'center',
     paddingHorizontal: 16,
     lineHeight: 19,
@@ -451,6 +455,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.12)',
     borderRadius: 31,
     padding: 10,
+  },
+  controlDockFloating: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 20,
   },
   composerRow: {
     flexDirection: 'row',

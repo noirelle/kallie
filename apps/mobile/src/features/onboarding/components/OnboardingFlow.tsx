@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { KallieAvatarBadge } from '../../../components/KallieAvatarBadge';
+import { AgentAudioVisualizerAura } from '../../../components/AgentAudioVisualizerAura';
 import { PermissionStates } from '../hooks/useOnboardingPermissions';
 import { BackArrowIcon, TopicGlyph, TopicIconKind } from './OnboardingIcons';
 
@@ -107,11 +107,16 @@ export function OnboardingFlow({
         )}
       </View>
 
-      {/* Step 0 — Welcome Hero (Reference Design) */}
+      {/* Step 0 — Welcome Hero with animated cycling Aura */}
       {step === 0 ? (
         <View style={styles.centeredStage}>
           <View style={styles.heroWrap}>
-            <KallieAvatarBadge size="lg" />
+            <AgentAudioVisualizerAura
+              size="lg"
+              state="speaking"
+              audioLevel={0.48}
+              cycleDemoColors
+            />
           </View>
           <Text style={styles.displayTitle}>{'The AI that\ncalls you back'}</Text>
           <Text style={styles.subtitle}>Voice companion on your schedule</Text>
@@ -213,7 +218,12 @@ export function OnboardingFlow({
       {step === 3 ? (
         <View style={styles.centeredStage}>
           <View style={styles.compactHeroWrap}>
-            <KallieAvatarBadge size="sm" />
+            <AgentAudioVisualizerAura
+              size="md"
+              state="listening"
+              audioLevel={0.32}
+              cycleDemoColors
+            />
           </View>
 
           <View style={styles.headerBlock}>
@@ -373,10 +383,10 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   heroWrap: {
-    marginBottom: 34,
+    marginBottom: 14,
   },
   compactHeroWrap: {
-    marginBottom: 24,
+    marginBottom: 6,
   },
   headerBlock: {
     alignItems: 'center',

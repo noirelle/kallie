@@ -28,6 +28,7 @@ export default function HomeScreen() {
     status,
     agentState,
     agentReady,
+    connectionStatus,
     error,
     isMuted,
     audioLevel,
@@ -88,6 +89,7 @@ export default function HomeScreen() {
       isCallReady={agentReady}
       status={status}
       agentState={agentState}
+      connectionStatus={startError ? 'disconnected' : connectionStatus}
       audioLevel={audioLevel}
       elapsedSeconds={elapsedSeconds}
       isMuted={isMuted}

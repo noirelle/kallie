@@ -21,6 +21,7 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
     status,
     agentState,
     agentReady,
+    connectionStatus,
     error,
     isMuted,
     isCameraOn,
@@ -51,6 +52,7 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
       isCallReady={agentReady}
       status={status}
       agentState={agentState}
+      connectionStatus={connectionStatus}
       audioLevel={audioLevel}
       elapsedSeconds={elapsedSeconds}
       isMuted={isMuted}

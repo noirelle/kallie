@@ -19,7 +19,9 @@ import {
   registerBackgroundFcmHandler,
   useNativeCallKeep,
 } from '../src/features/calling/hooks/useNativeCallKeep';
+import { AuraGuideSlider } from '../src/features/onboarding/components/AuraGuideSlider';
 import { OnboardingFlow } from '../src/features/onboarding/components/OnboardingFlow';
+import { useAuraGuide } from '../src/features/onboarding/hooks/useAuraGuide';
 import { useOnboardingPermissions } from '../src/features/onboarding/hooks/useOnboardingPermissions';
 import { AppUpdateBanner } from '../src/features/updates/components/AppUpdateBanner';
 import { useAutoUpdate } from '../src/features/updates/hooks/useAutoUpdate';
@@ -60,6 +62,7 @@ class AppErrorBoundary extends Component<
 function RootLayoutContent() {
   const { user, loading } = useAuth();
   const onboarding = useOnboardingPermissions();
+  const auraGuide = useAuraGuide(user?.id);
   const segments = useSegments();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
@@ -82,12 +85,15 @@ function RootLayoutContent() {
   } = useIncomingCall(user?.id);
 
   const isNavReady = Boolean(rootNavigationState?.key);
-  const isBooting = loading || !onboarding.hydrated;
+  const isBooting = loading || !onboarding.hydrated || (Boolean(user) && !auraGuide.hydrated);
   const inAuthGroup = segments[0] === '(auth)';
   const needsAuthRedirect =
     !isBooting && isNavReady && ((!user && !inAuthGroup) || (Boolean(user) && inAuthGroup));
   const showOnboarding = onboarding.hydrated && !onboarding.completed;
-  const showBootOverlay = isBooting || !isNavReady || (!showOnboarding && needsAuthRedirect);
+  const showAuraGuide =
+    !showOnboarding && Boolean(user) && auraGuide.hydrated && !auraGuide.completed;
+  const showBootOverlay =
+    isBooting || !isNavReady || (!showOnboarding && !showAuraGuide && needsAuthRedirect);
 
   useEffect(() => {
     const enforceHiddenStatusBar = () => {
@@ -147,6 +153,12 @@ function RootLayoutContent() {
             onToggleMicrophone={onboarding.toggleMicrophone}
             onComplete={handleCompleteOnboarding}
           />
+        </View>
+      ) : null}
+
+      {showAuraGuide ? (
+        <View style={styles.fullOverlay}>
+          <AuraGuideSlider onComplete={auraGuide.completeGuide} />
         </View>
       ) : null}
 
