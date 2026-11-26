@@ -79,9 +79,33 @@ except Exception as e:
     print("Login automation error:", e)
 PYEOF
 
-  sleep 10
+  sleep 8
+  echo "=== Dismissing / Allowing any Android runtime permission dialogs ==="
+  for attempt in 1 2 3; do
+    adb shell uiautomator dump /sdcard/perm_dump.xml >/dev/null 2>&1 || true
+    adb pull /sdcard/perm_dump.xml perm_dump.xml >/dev/null 2>&1 || true
+    python3 - <<'PYEOF'
+import re, subprocess, xml.etree.ElementTree as ET
+try:
+    root = ET.parse('perm_dump.xml').getroot()
+    for node in root.iter('node'):
+        txt = node.attrib.get('text', '').strip().lower()
+        rid = node.attrib.get('resource-id', '')
+        if txt in ('allow', 'while using the app', 'only this time') or 'permission_allow' in rid:
+            m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds', ''))
+            if m:
+                x1, y1, x2, y2 = map(int, m.groups())
+                print(f"Tapping permission button '{txt}' ({rid}) at {(x1+x2)//2},{(y1+y2)//2}")
+                subprocess.run(['adb', 'shell', 'input', 'tap', str((x1+x2)//2), str((y1+y2)//2)])
+                break
+except Exception as e:
+    print("Perm dump parse note:", e)
+PYEOF
+    sleep 3
+  done
+
   PID_POST_LOGIN=$(adb shell pidof "${PKG}" | tr -d '\r')
-  echo "PID_AFTER_LOGIN='${PID_POST_LOGIN}'"
+  echo "PID_AFTER_LOGIN_AND_PERMS='${PID_POST_LOGIN}'"
   adb exec-out screencap -p > emulator-screen-postlogin.png || true
 
   # Also test closing and cold-relaunching while logged in
