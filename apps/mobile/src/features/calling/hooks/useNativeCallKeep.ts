@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { PermissionsAndroid, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { apiClient } from '../../../lib/apiClient';
 import { setPendingCallConnection } from '../../../lib/callSessionStore';
 import { appEnv } from '../../../lib/env';
@@ -123,9 +123,10 @@ export function registerBackgroundFcmHandler(): void {
 export function useNativeCallKeep(
   userId: string | undefined,
   onAcceptedCall: (sessionId: string) => void,
+  enabled = true,
 ) {
   useEffect(() => {
-    if (!userId || Platform.OS === 'web') {
+    if (!enabled || !userId || Platform.OS === 'web') {
       return;
     }
 
@@ -142,12 +143,6 @@ export function useNativeCallKeep(
     let activeCallKeep: CallKeepModule | null = null;
 
     const init = async () => {
-      if (Platform.OS === 'android' && Platform.Version >= 33) {
-        await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-        ).catch(() => {});
-      }
-
       const callKeep = await ensureCallKeepSetup();
       if (cancelled) return;
       activeCallKeep = callKeep;
@@ -222,5 +217,5 @@ export function useNativeCallKeep(
       activeCallKeep?.removeEventListener('answerCall');
       activeCallKeep?.removeEventListener('endCall');
     };
-  }, [onAcceptedCall, userId]);
+  }, [enabled, onAcceptedCall, userId]);
 }

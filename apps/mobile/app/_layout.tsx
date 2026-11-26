@@ -11,6 +11,8 @@ import {
   registerBackgroundFcmHandler,
   useNativeCallKeep,
 } from '../src/features/calling/hooks/useNativeCallKeep';
+import { PermissionsSetupScreen } from '../src/features/onboarding/components/PermissionsSetupScreen';
+import { useOnboardingPermissions } from '../src/features/onboarding/hooks/useOnboardingPermissions';
 import { AppUpdateBanner } from '../src/features/updates/components/AppUpdateBanner';
 import { useAutoUpdate } from '../src/features/updates/hooks/useAutoUpdate';
 
@@ -49,6 +51,7 @@ class AppErrorBoundary extends Component<
 
 function RootLayoutContent() {
   const { user, loading } = useAuth();
+  const onboarding = useOnboardingPermissions();
   const segments = useSegments();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
@@ -61,7 +64,7 @@ function RootLayoutContent() {
     [router],
   );
 
-  useNativeCallKeep(user?.id, handleNativeAccepted);
+  useNativeCallKeep(user?.id, handleNativeAccepted, onboarding.completed);
 
   const {
     incomingSession,
@@ -71,9 +74,10 @@ function RootLayoutContent() {
   } = useIncomingCall(user?.id);
 
   const isNavReady = Boolean(rootNavigationState?.key);
+  const isBooting = loading || !onboarding.hydrated;
 
   useEffect(() => {
-    if (loading || !isNavReady) return;
+    if (isBooting || !isNavReady) return;
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!user && !inAuthGroup) {
@@ -81,7 +85,7 @@ function RootLayoutContent() {
     } else if (user && inAuthGroup) {
       router.replace('/');
     }
-  }, [isNavReady, loading, router, segments, user]);
+  }, [isBooting, isNavReady, router, segments, user]);
 
   const handleAccept = async () => {
     const joinData = await acceptIncomingCall();
@@ -94,11 +98,25 @@ function RootLayoutContent() {
     <View style={styles.root}>
       <StatusBar style="light" />
       <Slot />
-      {loading ? (
+
+      {onboarding.hydrated && !onboarding.completed ? (
+        <View style={styles.fullOverlay}>
+          <PermissionsSetupScreen
+            permissions={onboarding.permissions}
+            busyKey={onboarding.busyKey}
+            onToggleNotifications={onboarding.toggleNotifications}
+            onToggleMicrophone={onboarding.toggleMicrophone}
+            onContinue={onboarding.completeOnboarding}
+          />
+        </View>
+      ) : null}
+
+      {isBooting ? (
         <View style={styles.loaderOverlay}>
           <ActivityIndicator size="small" color="#FFFFFF" />
         </View>
       ) : null}
+
       <AppUpdateBanner
         state={autoUpdate.state}
         onApply={autoUpdate.applyUpdate}
@@ -128,6 +146,15 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#000000',
+  },
+  fullOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#000000',
+    zIndex: 80,
   },
   loaderOverlay: {
     position: 'absolute',
