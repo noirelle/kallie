@@ -197,7 +197,8 @@ async function cmdBuild() {
 async function cmdDev() {
   const env = buildEnv({ EXPO_ENABLE_ANDROID_FCM: 'true' });
   probe('adb', ['reverse', 'tcp:8081', 'tcp:8081'], env);
-  const code = await runCommand('npx', ['expo', 'start', '--android'], { env });
+  probe('adb', ['shell', 'monkey', '-p', 'com.kallie.app', '-c', 'android.intent.category.LAUNCHER', '1'], env);
+  const code = await runCommand('npx', ['expo', 'start', '--localhost'], { env });
   process.exit(code);
 }
 
