@@ -1,19 +1,30 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
-import { Linking, PermissionsAndroid, Platform } from 'react-native';
+import { AppState, Linking, PermissionsAndroid, Platform } from 'react-native';
+import { nativeIncomingCall } from '../../calling/lib/nativeIncomingCall';
 
 const ONBOARDING_STORAGE_KEY = 'kallie_onboarding_v2';
 
 export interface PermissionStates {
   notifications: boolean;
   microphone: boolean;
+  fullScreenIntent: boolean;
 }
+
+export type PermissionBusyKey =
+  | 'notifications'
+  | 'microphone'
+  | 'fullScreenIntent'
+  | null;
 
 export interface OnboardingSavedData {
   completed: boolean;
   discoverySource: string | null;
   interests: string[];
 }
+
+const SUPPORTS_FULL_SCREEN_INTENT_TOGGLE =
+  Platform.OS === 'android' && Number(Platform.Version) >= 34;
 
 async function checkAndroidNotificationPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
@@ -38,6 +49,11 @@ async function checkAndroidMicPermission(): Promise<boolean> {
   }
 }
 
+async function checkAndroidFullScreenIntentPermission(): Promise<boolean> {
+  if (!SUPPORTS_FULL_SCREEN_INTENT_TOGGLE) return true;
+  return nativeIncomingCall.canUseFullScreenIntent();
+}
+
 export function useOnboardingPermissions() {
   const [hydrated, setHydrated] = useState(false);
   const [completed, setCompleted] = useState(false);
@@ -46,15 +62,17 @@ export function useOnboardingPermissions() {
   const [permissions, setPermissions] = useState<PermissionStates>({
     notifications: false,
     microphone: false,
+    fullScreenIntent: !SUPPORTS_FULL_SCREEN_INTENT_TOGGLE,
   });
-  const [busyKey, setBusyKey] = useState<'notifications' | 'microphone' | null>(null);
+  const [busyKey, setBusyKey] = useState<PermissionBusyKey>(null);
 
   const refreshPermissions = useCallback(async () => {
-    const [notifications, microphone] = await Promise.all([
+    const [notifications, microphone, fullScreenIntent] = await Promise.all([
       checkAndroidNotificationPermission(),
       checkAndroidMicPermission(),
+      checkAndroidFullScreenIntentPermission(),
     ]);
-    setPermissions({ notifications, microphone });
+    setPermissions({ notifications, microphone, fullScreenIntent });
   }, []);
 
   useEffect(() => {
@@ -78,8 +96,16 @@ export function useOnboardingPermissions() {
       }
     };
     void init();
+
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void refreshPermissions();
+      }
+    });
+
     return () => {
       active = false;
+      appStateSub.remove();
     };
   }, [refreshPermissions]);
 
@@ -135,6 +161,20 @@ export function useOnboardingPermissions() {
     }
   }, [busyKey, permissions.microphone, refreshPermissions]);
 
+  const toggleFullScreenIntent = useCallback(async () => {
+    if (busyKey) return;
+    setBusyKey('fullScreenIntent');
+    try {
+      const opened = await nativeIncomingCall.openFullScreenIntentSettings();
+      if (!opened) {
+        await Linking.openSettings();
+      }
+      await refreshPermissions();
+    } finally {
+      setBusyKey(null);
+    }
+  }, [busyKey, refreshPermissions]);
+
   const toggleInterest = useCallback((id: string) => {
     setInterests((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
@@ -163,8 +203,10 @@ export function useOnboardingPermissions() {
     toggleInterest,
     permissions,
     busyKey,
+    supportsFullScreenIntentToggle: SUPPORTS_FULL_SCREEN_INTENT_TOGGLE,
     toggleNotifications,
     toggleMicrophone,
+    toggleFullScreenIntent,
     completeOnboarding,
   };
 }

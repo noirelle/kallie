@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { apiClient } from '../../../lib/apiClient';
 import { setPendingCallConnection } from '../../../lib/callSessionStore';
 import { appEnv } from '../../../lib/env';
+import { nativeIncomingCall } from '../lib/nativeIncomingCall';
 
 type CallKeepModule = {
   setup: (options: Record<string, unknown>) => Promise<void>;
@@ -19,18 +20,32 @@ type CallKeepModule = {
   removeEventListener: (event: string) => void;
 };
 
+type FirebaseRemoteMessage = {
+  data?: Record<string, string>;
+  notification?: {
+    title?: string;
+    body?: string;
+  };
+};
+
 type FirebaseMessagingInstance = {
   requestPermission: () => Promise<number>;
   getToken: () => Promise<string>;
   onTokenRefresh: (cb: (token: string) => void) => () => void;
-  onMessage: (cb: (msg: { data?: Record<string, string> }) => void) => () => void;
+  onMessage: (cb: (msg: FirebaseRemoteMessage) => void) => () => void;
   setBackgroundMessageHandler: (
-    cb: (msg: { data?: Record<string, string> }) => Promise<void>,
+    cb: (msg: FirebaseRemoteMessage) => Promise<void>,
   ) => void;
 };
 
+export interface ForegroundIncomingCallPayload {
+  sessionId: string;
+  title: string;
+  roomName?: string;
+}
+
 function getCallKeep(): CallKeepModule | null {
-  if (Platform.OS === 'web') return null;
+  if (Platform.OS !== 'ios') return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require('react-native-callkeep');
@@ -55,7 +70,7 @@ function getFirebaseMessaging(): FirebaseMessagingInstance | null {
 let callKeepConfigured = false;
 let backgroundHandlerRegistered = false;
 
-async function ensureCallKeepSetup(): Promise<CallKeepModule | null> {
+async function ensureIosCallKeepSetup(): Promise<CallKeepModule | null> {
   const callKeep = getCallKeep();
   if (!callKeep) return null;
   if (callKeepConfigured) return callKeep;
@@ -74,11 +89,6 @@ async function ensureCallKeepSetup(): Promise<CallKeepModule | null> {
         okButton: 'Allow',
         additionalPermissions: [],
         selfManaged: true,
-        foregroundService: {
-          channelId: 'com.kallie.app.calls',
-          channelName: 'Kallie Incoming Calls',
-          notificationTitle: 'Kallie call in progress',
-        },
       },
     });
     callKeepConfigured = true;
@@ -89,13 +99,16 @@ async function ensureCallKeepSetup(): Promise<CallKeepModule | null> {
 }
 
 /**
- * Registers the Android killed/background FCM handler at module startup so
- * high-priority incoming_call pushes wake a locked phone and display CallKeep.
+ * Registers the Android background / killed FCM handler at module load so
+ * high-priority data pushes trigger the native full-screen incoming call
+ * notification (CATEGORY_CALL + setFullScreenIntent) or dismiss ended calls.
  */
 export function registerBackgroundFcmHandler(): void {
   if (backgroundHandlerRegistered || Platform.OS !== 'android' || !appEnv.enableAndroidFcm) {
     return;
   }
+
+  nativeIncomingCall.ensureChannels();
 
   const messaging = getFirebaseMessaging();
   if (!messaging) return;
@@ -103,20 +116,26 @@ export function registerBackgroundFcmHandler(): void {
   backgroundHandlerRegistered = true;
   messaging.setBackgroundMessageHandler(async (remoteMessage) => {
     const data = remoteMessage.data;
-    if (!data || data.type !== 'incoming_call' || !data.sessionId) {
+    if (!data?.type) return;
+
+    if (data.type === 'incoming_call' && data.sessionId) {
+      nativeIncomingCall.showIncomingCall(data.sessionId, data.title || 'Kallie');
       return;
     }
 
-    const callKeep = await ensureCallKeepSetup();
-    if (!callKeep) return;
+    if (data.type === 'call_ended' && data.sessionId) {
+      nativeIncomingCall.dismissIncomingCall(data.sessionId);
+      return;
+    }
 
-    callKeep.displayIncomingCall(
-      data.sessionId,
-      'Kallie',
-      data.title || 'Kallie is calling',
-      'generic',
-      false,
-    );
+    if (data.type === 'call_reminder' && data.scheduleId && !remoteMessage.notification) {
+      const minutes = data.minutesBefore || '10';
+      const body =
+        data.scheduledTimeText
+          ? `Kallie will call you in ${minutes} minutes (${data.scheduledTimeText}).`
+          : `Kallie will call you in ${minutes} minutes.`;
+      nativeIncomingCall.showReminderNotification(data.scheduleId, 'Kallie', body);
+    }
   });
 }
 
@@ -124,7 +143,20 @@ export function useNativeCallKeep(
   userId: string | undefined,
   onAcceptedCall: (sessionId: string) => void,
   enabled = true,
+  options?: {
+    onForegroundIncomingCall?: (payload: ForegroundIncomingCallPayload) => void;
+    onForegroundCallEnded?: (sessionId: string) => void;
+  },
 ) {
+  const onForegroundIncomingCall = options?.onForegroundIncomingCall;
+  const onForegroundCallEnded = options?.onForegroundCallEnded;
+
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      nativeIncomingCall.ensureChannels();
+    }
+  }, []);
+
   useEffect(() => {
     if (!enabled || !userId || Platform.OS === 'web') {
       return;
@@ -143,29 +175,34 @@ export function useNativeCallKeep(
     let activeCallKeep: CallKeepModule | null = null;
 
     const init = async () => {
-      const callKeep = await ensureCallKeepSetup();
-      if (cancelled) return;
-      activeCallKeep = callKeep;
+      if (Platform.OS === 'ios') {
+        const callKeep = await ensureIosCallKeepSetup();
+        if (cancelled) return;
+        activeCallKeep = callKeep;
 
-      if (callKeep) {
-        callKeep.addEventListener('answerCall', async ({ callUUID }) => {
-          try {
-            callKeep.backToForeground();
-            const joinData = await apiClient.acceptCall(callUUID);
-            setPendingCallConnection(joinData);
-            onAcceptedCall(joinData.session.id);
-          } catch {
-            callKeep.endCall(callUUID);
-          }
-        });
+        if (callKeep) {
+          callKeep.addEventListener('answerCall', async ({ callUUID }) => {
+            try {
+              callKeep.backToForeground();
+              const joinData = await apiClient.acceptCall(callUUID);
+              setPendingCallConnection(joinData);
+              onAcceptedCall(joinData.session.id);
+            } catch {
+              callKeep.endCall(callUUID);
+            }
+          });
 
-        callKeep.addEventListener('endCall', ({ callUUID }) => {
-          void apiClient.declineCall(callUUID).catch(() => {});
-          void apiClient.endCall(callUUID).catch(() => {});
-        });
+          callKeep.addEventListener('endCall', ({ callUUID }) => {
+            void apiClient.declineCall(callUUID).catch(() => {});
+            void apiClient.endCall(callUUID).catch(() => {});
+          });
+        }
+        return;
       }
 
       if (Platform.OS === 'android') {
+        nativeIncomingCall.ensureChannels();
+
         const messaging = getFirebaseMessaging();
         if (!messaging) return;
 
@@ -192,14 +229,31 @@ export function useNativeCallKeep(
 
           unsubForegroundMsg = messaging.onMessage((remoteMessage) => {
             const data = remoteMessage.data;
-            if (data?.type === 'incoming_call' && data.sessionId && callKeep) {
-              callKeep.displayIncomingCall(
-                data.sessionId,
-                'Kallie',
-                data.title || 'Kallie is calling',
-                'generic',
-                false,
-              );
+            if (!data?.type) return;
+
+            if (data.type === 'incoming_call' && data.sessionId) {
+              onForegroundIncomingCall?.({
+                sessionId: data.sessionId,
+                title: data.title || 'Kallie',
+                roomName: data.roomName,
+              });
+              return;
+            }
+
+            if (data.type === 'call_ended' && data.sessionId) {
+              nativeIncomingCall.dismissIncomingCall(data.sessionId);
+              onForegroundCallEnded?.(data.sessionId);
+              return;
+            }
+
+            if (data.type === 'call_reminder' && data.scheduleId) {
+              const title = remoteMessage.notification?.title || 'Kallie';
+              const body =
+                remoteMessage.notification?.body ||
+                (data.scheduledTimeText
+                  ? `Kallie will call you in ${data.minutesBefore || '10'} minutes (${data.scheduledTimeText}).`
+                  : `Kallie will call you in ${data.minutesBefore || '10'} minutes.`);
+              nativeIncomingCall.showReminderNotification(data.scheduleId, title, body);
             }
           });
         } catch {
@@ -217,5 +271,11 @@ export function useNativeCallKeep(
       activeCallKeep?.removeEventListener('answerCall');
       activeCallKeep?.removeEventListener('endCall');
     };
-  }, [enabled, onAcceptedCall, userId]);
+  }, [
+    enabled,
+    onAcceptedCall,
+    onForegroundCallEnded,
+    onForegroundIncomingCall,
+    userId,
+  ]);
 }

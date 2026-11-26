@@ -9,12 +9,32 @@ interface ClaimedSchedule {
   user_id: string;
   title: string;
   ai_prompt: string;
+  next_run_at: string | null;
+  timezone: string | null;
+  reminder_offset_minutes?: number | null;
+}
+
+function formatScheduledTime(iso: string, timeZone?: string | null): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: timeZone || 'Asia/Manila',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(iso));
+  } catch {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Manila',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(iso));
+  }
 }
 
 @Injectable()
 export class SchedulerService {
   private readonly logger = new Logger(SchedulerService.name);
   private isPolling = false;
+  private readonly fallbackSentReminders = new Map<string, number>();
 
   constructor(
     private readonly supabaseAdmin: SupabaseAdminService,
@@ -29,6 +49,7 @@ export class SchedulerService {
     this.isPolling = true;
 
     try {
+      await this.sendDueReminders();
       await this.triggerDueCalls();
       await this.expireUnansweredCalls();
     } catch (error) {
@@ -38,6 +59,74 @@ export class SchedulerService {
       );
     } finally {
       this.isPolling = false;
+    }
+  }
+
+  private async sendDueReminders() {
+    const { data, error } = await this.supabaseAdmin.client.rpc('claim_due_reminders', {
+      batch_size: 20,
+    });
+
+    let schedules: ClaimedSchedule[] = [];
+
+    if (error) {
+      // Fallback when 002_schedule_reminders.sql has not been applied yet:
+      // query active schedules due within the next 10 minutes and deduplicate in memory.
+      const now = Date.now();
+      const minWindow = new Date(now + 30_000).toISOString();
+      const maxWindow = new Date(now + 10 * 60_000).toISOString();
+
+      const { data: fallbackRows, error: fallbackError } = await this.supabaseAdmin.client
+        .from('call_schedules')
+        .select('id, user_id, title, ai_prompt, next_run_at, timezone')
+        .eq('status', 'active')
+        .gt('next_run_at', minWindow)
+        .lte('next_run_at', maxWindow)
+        .limit(20);
+
+      if (fallbackError || !fallbackRows?.length) {
+        return;
+      }
+
+      // Prune stale deduplication keys older than 24h
+      for (const [key, ts] of this.fallbackSentReminders.entries()) {
+        if (now - ts > 24 * 60 * 60_000) {
+          this.fallbackSentReminders.delete(key);
+        }
+      }
+
+      schedules = (fallbackRows as ClaimedSchedule[]).filter((row) => {
+        if (!row.next_run_at) return false;
+        const key = `${row.id}:${row.next_run_at}`;
+        if (this.fallbackSentReminders.has(key)) {
+          return false;
+        }
+        this.fallbackSentReminders.set(key, now);
+        return true;
+      });
+    } else {
+      schedules = (data || []) as ClaimedSchedule[];
+    }
+
+    if (schedules.length === 0) {
+      return;
+    }
+
+    this.logger.log(`Claimed ${schedules.length} due call reminder(s).`);
+
+    for (const schedule of schedules) {
+      if (!schedule.next_run_at) continue;
+      const msUntil = new Date(schedule.next_run_at).getTime() - Date.now();
+      const minutesUntil = Math.max(1, Math.round(msUntil / 60_000));
+      const formattedTime = formatScheduledTime(schedule.next_run_at, schedule.timezone);
+
+      await this.notificationsService.notifyCallReminder(schedule.user_id, {
+        scheduleId: schedule.id,
+        title: schedule.title,
+        scheduledAt: schedule.next_run_at,
+        minutesUntil,
+        formattedTime,
+      });
     }
   }
 
@@ -90,7 +179,7 @@ export class SchedulerService {
 
   private async expireUnansweredCalls() {
     const cutoff = new Date(Date.now() - 35_000).toISOString();
-    const { error } = await this.supabaseAdmin.client
+    const { data: expired, error } = await this.supabaseAdmin.client
       .from('call_sessions')
       .update({
         status: 'missed',
@@ -98,10 +187,23 @@ export class SchedulerService {
         updated_at: new Date().toISOString(),
       })
       .eq('status', 'ringing')
-      .lt('created_at', cutoff);
+      .lt('created_at', cutoff)
+      .select('id, user_id');
 
     if (error) {
       this.logger.warn(`Failed to expire unanswered calls: ${error.message}`);
+      return;
+    }
+
+    if (expired && expired.length > 0) {
+      await Promise.all(
+        expired.map((row: { id: string; user_id: string }) =>
+          this.notificationsService.notifyCallEnded(row.user_id, {
+            sessionId: row.id,
+            reason: 'missed',
+          }),
+        ),
+      );
     }
   }
 }

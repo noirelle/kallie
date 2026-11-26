@@ -1,5 +1,14 @@
 import React from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { AgentAudioVisualizerAura } from '../../../components/AgentAudioVisualizerAura';
 import { CallSession } from '../../../types/database';
 
 interface IncomingCallModalProps {
@@ -16,123 +25,113 @@ export function IncomingCallModal({
   onDecline,
 }: IncomingCallModalProps) {
   return (
-    <Modal visible={Boolean(session)} animationType="fade" transparent>
-      <View style={styles.overlay}>
-        <View style={styles.card}>
-          <View style={styles.pulseOuter}>
-            <View style={styles.pulseDot} />
-          </View>
-
-          <Text style={styles.incomingLabel}>KALLIE IS CALLING</Text>
-          <Text style={styles.title}>{session?.title || 'Scheduled Callback'}</Text>
-          <Text style={styles.prompt} numberOfLines={3}>
-            {session?.ai_prompt}
-          </Text>
-
-          <View style={styles.actions}>
-            <Pressable
-              style={[styles.btn, styles.declineBtn]}
-              onPress={onDecline}
-              disabled={processing}
-            >
-              <Text style={styles.btnText}>DECLINE</Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.btn, styles.acceptBtn]}
-              onPress={onAccept}
-              disabled={processing}
-            >
-              {processing ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.btnText}>ANSWER</Text>
-              )}
-            </Pressable>
-          </View>
+    <Modal
+      visible={Boolean(session)}
+      animationType="fade"
+      presentationStyle="fullScreen"
+      statusBarTranslucent
+      hardwareAccelerated
+      onRequestClose={onDecline}
+    >
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={styles.auraStage}>
+          <AgentAudioVisualizerAura
+            size="xl"
+            connectionStatus={processing ? 'connected' : 'connecting'}
+            state="speaking"
+            audioLevel={processing ? 0.54 : 0.38}
+          />
         </View>
-      </View>
+
+        <View style={styles.actionsRow}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.button,
+              styles.endButton,
+              pressed && styles.endButtonPressed,
+              processing && styles.buttonDisabled,
+            ]}
+            onPress={onDecline}
+            disabled={processing}
+            accessibilityRole="button"
+            accessibilityLabel="End"
+          >
+            <Text style={styles.buttonText}>End</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.button,
+              styles.answerButton,
+              pressed && styles.answerButtonPressed,
+              processing && styles.buttonDisabled,
+            ]}
+            onPress={onAccept}
+            disabled={processing}
+            accessibilityRole="button"
+            accessibilityLabel="Answer"
+          >
+            {processing ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Answer</Text>
+            )}
+          </Pressable>
+        </View>
+      </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
+  container: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.92)',
-    justifyContent: 'center',
+    backgroundColor: '#000000',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: 28,
+    paddingBottom: 40,
   },
-  card: {
+  auraStage: {
+    flex: 1,
     width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#0A0A0A',
-    borderRadius: 24,
-    padding: 28,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  pulseOuter: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(16, 185, 129, 0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.35)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 18,
   },
-  pulseDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#34D399',
-  },
-  incomingLabel: {
-    color: '#34D399',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.4,
-    marginBottom: 8,
-  },
-  title: {
-    color: '#FAFAFA',
-    fontSize: 19,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  prompt: {
-    color: '#A1A1AA',
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 19,
-    marginBottom: 24,
-  },
-  actions: {
+  actionsRow: {
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
     width: '100%',
+    maxWidth: 340,
   },
-  btn: {
+  button: {
     flex: 1,
-    paddingVertical: 14,
+    height: 56,
     borderRadius: 999,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  declineBtn: {
+  endButton: {
     backgroundColor: '#DC2626',
   },
-  acceptBtn: {
+  endButtonPressed: {
+    backgroundColor: '#B91C1C',
+  },
+  answerButton: {
+    backgroundColor: '#10B981',
+  },
+  answerButtonPressed: {
     backgroundColor: '#059669',
   },
-  btnText: {
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  buttonText: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
 });

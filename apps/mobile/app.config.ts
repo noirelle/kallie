@@ -64,6 +64,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     './plugins/withCallKeepAndroid',
     './plugins/withAndroidOptimization',
     './plugins/withImmersiveAndroid',
+    './plugins/withIncomingCallAndroid',
     ...(enableAndroidFcm ? ['@react-native-firebase/app'] : []),
   ],
   updates: {

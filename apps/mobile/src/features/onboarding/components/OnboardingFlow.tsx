@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AgentAudioVisualizerAura } from '../../../components/AgentAudioVisualizerAura';
-import { PermissionStates } from '../hooks/useOnboardingPermissions';
+import {
+  PermissionBusyKey,
+  PermissionStates,
+} from '../hooks/useOnboardingPermissions';
 import { BackArrowIcon, TopicGlyph, TopicIconKind } from './OnboardingIcons';
 
 interface OnboardingFlowProps {
@@ -11,9 +14,11 @@ interface OnboardingFlowProps {
   interests: string[];
   onToggleInterest: (id: string) => void;
   permissions: PermissionStates;
-  busyKey: 'notifications' | 'microphone' | null;
+  busyKey: PermissionBusyKey;
+  showFullScreenIntentToggle?: boolean;
   onToggleNotifications: () => void;
   onToggleMicrophone: () => void;
+  onToggleFullScreenIntent?: () => void;
   onComplete: (intent: 'signup' | 'login') => void;
 }
 
@@ -57,8 +62,10 @@ export function OnboardingFlow({
   onToggleInterest,
   permissions,
   busyKey,
+  showFullScreenIntentToggle = false,
   onToggleNotifications,
   onToggleMicrophone,
+  onToggleFullScreenIntent,
   onComplete,
 }: OnboardingFlowProps) {
   const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
@@ -75,7 +82,10 @@ export function OnboardingFlow({
     }
   };
 
-  const allPermissionsGranted = permissions.notifications && permissions.microphone;
+  const allPermissionsGranted =
+    permissions.notifications &&
+    permissions.microphone &&
+    (!showFullScreenIntentToggle || permissions.fullScreenIntent);
 
   const primaryLabel =
     step === 0
@@ -287,6 +297,36 @@ export function OnboardingFlow({
                 />
               </View>
             </Pressable>
+
+            {showFullScreenIntentToggle && onToggleFullScreenIntent ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.permPill,
+                  permissions.fullScreenIntent && styles.permPillEnabled,
+                  pressed && styles.surfacePressed,
+                ]}
+                onPress={onToggleFullScreenIntent}
+                disabled={busyKey === 'fullScreenIntent'}
+              >
+                <View style={styles.permText}>
+                  <Text style={styles.permTitle}>Full-screen calls</Text>
+                  <Text style={styles.permSub}>Ring over lock screen</Text>
+                </View>
+                <View
+                  style={[
+                    styles.switchTrack,
+                    permissions.fullScreenIntent && styles.switchTrackOn,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.switchThumb,
+                      permissions.fullScreenIntent && styles.switchThumbOn,
+                    ]}
+                  />
+                </View>
+              </Pressable>
+            ) : null}
           </View>
         </View>
       ) : null}

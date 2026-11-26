@@ -75,14 +75,19 @@ function RootLayoutContent() {
     [router],
   );
 
-  useNativeCallKeep(user?.id, handleNativeAccepted, onboarding.completed);
-
   const {
     incomingSession,
     processing,
+    presentForegroundPush,
+    dismissSession,
     acceptIncomingCall,
     declineIncomingCall,
-  } = useIncomingCall(user?.id);
+  } = useIncomingCall(user?.id, handleNativeAccepted);
+
+  useNativeCallKeep(user?.id, handleNativeAccepted, onboarding.completed, {
+    onForegroundIncomingCall: presentForegroundPush,
+    onForegroundCallEnded: dismissSession,
+  });
 
   const isNavReady = Boolean(rootNavigationState?.key);
   const isBooting = loading || !onboarding.hydrated || (Boolean(user) && !auraGuide.hydrated);
@@ -149,8 +154,10 @@ function RootLayoutContent() {
             onToggleInterest={onboarding.toggleInterest}
             permissions={onboarding.permissions}
             busyKey={onboarding.busyKey}
+            showFullScreenIntentToggle={onboarding.supportsFullScreenIntentToggle}
             onToggleNotifications={onboarding.toggleNotifications}
             onToggleMicrophone={onboarding.toggleMicrophone}
+            onToggleFullScreenIntent={onboarding.toggleFullScreenIntent}
             onComplete={handleCompleteOnboarding}
           />
         </View>

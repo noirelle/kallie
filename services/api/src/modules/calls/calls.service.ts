@@ -13,6 +13,7 @@ import {
   RoomServiceClient,
 } from 'livekit-server-sdk';
 import { SupabaseAdminService } from '../../common/supabase/supabaseAdmin.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateTestCallDto } from './dto/createTestCall.dto';
 
 export interface CallSessionRecord {
@@ -39,6 +40,7 @@ export class CallsService {
   constructor(
     private readonly configService: ConfigService,
     private readonly supabaseAdmin: SupabaseAdminService,
+    private readonly notificationsService: NotificationsService,
   ) {
     this.livekitUrl = this.configService.get<string>('LIVEKIT_URL') || '';
     this.livekitHttpUrl = this.livekitUrl
@@ -216,6 +218,10 @@ export class CallsService {
       this.mintUserToken(updated.room_name, userId, userEmail),
     ]);
 
+    void this.notificationsService
+      .notifyCallEnded(userId, { sessionId: updated.id, reason: 'ended' })
+      .catch(() => {});
+
     return {
       session: updated,
       livekitUrl: this.livekitUrl,
@@ -243,6 +249,10 @@ export class CallsService {
         `Failed to decline call session: ${error.message}`,
       );
     }
+
+    void this.notificationsService
+      .notifyCallEnded(userId, { sessionId, reason: 'declined' })
+      .catch(() => {});
 
     return { ok: true, session: data };
   }
@@ -276,6 +286,10 @@ export class CallsService {
         this.logger.debug(`LiveKit room cleanup skipped for ${session.room_name}: ${err}`);
       });
     }
+
+    void this.notificationsService
+      .notifyCallEnded(userId, { sessionId, reason: 'ended' })
+      .catch(() => {});
 
     return { ok: true, session };
   }
