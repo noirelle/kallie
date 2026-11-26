@@ -253,8 +253,19 @@ export function useLiveKitCall(params: {
     const room = new Room({
       adaptiveStream: true,
       dynacast: true,
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
     });
     roomRef.current = room;
+
+    const markConnectedIfStable = () => {
+      setConnectionStatus((prev) =>
+        prev === 'weak' || prev === 'disconnected' ? prev : 'connected',
+      );
+    };
 
     const syncAgentAttrState = (attrs?: Record<string, string>) => {
       const parsed = parseAgentState(attrs?.['lk.agent.state']);
@@ -262,9 +273,7 @@ export function useLiveKitCall(params: {
         setAgentState(parsed);
         if (parsed === 'listening' || parsed === 'thinking' || parsed === 'speaking') {
           setAgentReady(true);
-          setConnectionStatus((prev) =>
-            prev === 'weak' || prev === 'disconnected' ? prev : 'connected',
-          );
+          markConnectedIfStable();
         }
         if (parsed === 'speaking') {
           setStatus('agent_speaking');
@@ -293,6 +302,7 @@ export function useLiveKitCall(params: {
       );
       if (remoteSpeaker) {
         setAgentReady(true);
+        markConnectedIfStable();
         setStatus('agent_speaking');
         setAgentState('speaking');
         setAudioLevel(Math.max(0.35, Math.min(1, remoteSpeaker.audioLevel || 0.65)));
@@ -314,9 +324,7 @@ export function useLiveKitCall(params: {
         setAgentJoined(true);
         if (track.kind === Track.Kind.Audio) {
           setAgentReady(true);
-          setConnectionStatus((prev) =>
-            prev === 'weak' || prev === 'disconnected' ? prev : 'connected',
-          );
+          markConnectedIfStable();
         }
       }
     });
@@ -450,9 +458,14 @@ export function useLiveKitCall(params: {
             },
           });
           await nativeLk.AudioSession.startAudioSession();
+          // Lock speaker route upfront before media starts so Android AudioManager
+          // does not switch output devices mid-greeting (which causes initial audio glitches)
+          await nativeLk.AudioSession.selectAudioOutput?.('speaker').catch(() => {});
         }
 
-        await room.connect(params.livekitUrl, params.token);
+        await room.connect(params.livekitUrl, params.token, {
+          autoSubscribe: true,
+        });
         if (cancelled) {
           await room.disconnect();
           return;
@@ -463,7 +476,11 @@ export function useLiveKitCall(params: {
         if (Platform.OS === 'web') {
           await room.startAudio().catch(() => {});
         }
-        await room.localParticipant.setMicrophoneEnabled(true);
+        await room.localParticipant.setMicrophoneEnabled(true, {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        });
 
         if (!cancelled) {
           const hasRemote = room.remoteParticipants.size > 0;
@@ -478,6 +495,7 @@ export function useLiveKitCall(params: {
           });
           if (alreadyHasAudio) {
             setAgentReady(true);
+            markConnectedIfStable();
             setAgentState((prev) => (prev === 'connecting' ? 'listening' : prev));
           }
         }

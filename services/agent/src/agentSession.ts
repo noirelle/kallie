@@ -57,6 +57,51 @@ function getCurrentManilaDateTime(): string {
   return `${formatted} (Asia/Manila, UTC+8)`;
 }
 
+/**
+ * Wait until the caller's WebRTC audio track is subscribed in the room
+ * (proving ICE/DTLS + Android AudioSession/AEC are established on the device)
+ * before triggering Kallie's opening greeting. Prevents initial words from
+ * stuttering, cutting off, or being interrupted during client SDP setup.
+ */
+async function waitForCallerMediaReady(
+  ctx: JobContext,
+  timeoutMs = 2500,
+): Promise<void> {
+  const isAudioKind = (kind: unknown) =>
+    kind === 1 || String(kind).toLowerCase().includes('audio');
+
+  const hasSubscribedRemoteAudio = () =>
+    Array.from(ctx.room.remoteParticipants.values()).some((participant) =>
+      Array.from(participant.trackPublications.values()).some(
+        (pub) => pub.subscribed && isAudioKind(pub.kind),
+      ),
+    );
+
+  if (hasSubscribedRemoteAudio()) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      ctx.room.off('trackSubscribed', onTrackSubscribed);
+      ctx.room.off('disconnected', finish);
+      resolve();
+    };
+    const onTrackSubscribed = (track: { kind?: unknown }) => {
+      if (isAudioKind(track?.kind)) {
+        finish();
+      }
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    ctx.room.on('trackSubscribed', onTrackSubscribed);
+    ctx.room.on('disconnected', finish);
+  });
+}
+
 export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
   const metadata = parseJobMetadata(ctx.job.metadata);
   const title = metadata.title || 'Call with Kallie';
@@ -150,6 +195,14 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
 
   if (ctx.room.remoteParticipants.size === 0) {
     await ctx.waitForParticipant();
+  }
+
+  // Wait for bidirectional WebRTC audio readiness before greeting so first syllables
+  // play smoothly into an already-settled, echo-cancelled audio stream
+  await waitForCallerMediaReady(ctx, 2500);
+
+  if (!ctx.room.isConnected) {
+    return;
   }
 
   const openingInstruction = metadata.isScheduledCallback

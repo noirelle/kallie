@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
-const AURA_GUIDE_KEY_PREFIX = 'kallie_aura_guide_v1_';
+const AURA_GUIDE_KEY_PREFIX = 'kallie_aura_guide_v2_';
 
 export function useAuraGuide(userId?: string) {
   const [hydrated, setHydrated] = useState(false);

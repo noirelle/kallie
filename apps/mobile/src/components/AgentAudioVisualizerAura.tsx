@@ -31,136 +31,13 @@ const RING_DIAMETERS: Record<AuraSize, number> = {
   xl: 228,
 };
 
-interface AuraRibbonSetProps {
-  palette: AuraColorPalette;
-  ringSize: number;
-  glowBlur: number;
-  stroke: number;
-  colorShift: number;
-  spinCW: Animated.AnimatedInterpolation<string>;
-  spinCCW: Animated.AnimatedInterpolation<string>;
-  spinFastCW: Animated.AnimatedInterpolation<string>;
-  haloScale: Animated.AnimatedAddition;
-  ribbonScale: Animated.AnimatedAddition;
-  haloOpacity: Animated.AnimatedInterpolation<number>;
-}
-
-/**
- * Seamless 360° continuous ribbon set:
- * Uses uniform borderWidth on every ring (eliminating Android miter seams or
- * "two halves" artifacts) and renders inside an unclipped canvas so the outer
- * glow never clips horizontally or vertically.
- */
-const AuraRibbonSet = memo(function AuraRibbonSet({
-  palette,
-  ringSize,
-  glowBlur,
-  stroke,
-  colorShift,
-  spinCW,
-  spinCCW,
-  spinFastCW,
-  haloScale,
-  ribbonScale,
-  haloOpacity,
-}: AuraRibbonSetProps) {
-  const outerRing = Math.round(ringSize * 0.99);
-  const midRing = Math.round(ringSize * 0.95);
-  const innerRing = Math.round(ringSize * 0.91);
-  const shiftIntensity = Math.max(0.1, Math.min(0.6, colorShift));
-
-  return (
-    <View style={styles.ribbonLayer} pointerEvents="none">
-      {/* Continuous ambient 360° halo glow (non-rotating for silky 60fps GPU perf) */}
-      <Animated.View
-        style={[
-          styles.circle,
-          {
-            width: ringSize,
-            height: ringSize,
-            borderRadius: ringSize / 2,
-            borderWidth: Math.max(1.5, stroke * 0.75),
-            borderColor: palette.glowRgba,
-            boxShadow: `0 0 ${glowBlur}px ${Math.max(2, Math.round(glowBlur * 0.22))}px ${palette.glowRgba}`,
-            opacity: haloOpacity,
-            transform: [{ scale: haloScale }],
-          },
-        ]}
-      />
-
-      {/* Secondary shifted organic elliptical ring (uniform stroke, zero seams) */}
-      <Animated.View
-        style={[
-          styles.circle,
-          {
-            width: outerRing,
-            height: outerRing,
-            borderRadius: outerRing / 2,
-            borderWidth: stroke * 1.15,
-            borderColor: palette.secondary,
-            opacity: 0.45 + shiftIntensity * 0.7,
-            transform: [
-              { rotate: spinCCW },
-              { scaleX: 1.045 },
-              { scaleY: 0.955 },
-              { scale: ribbonScale },
-            ],
-          },
-        ]}
-      />
-
-      {/* Primary luminous undulating energy ring */}
-      <Animated.View
-        style={[
-          styles.circle,
-          {
-            width: midRing,
-            height: midRing,
-            borderRadius: midRing / 2,
-            borderWidth: stroke,
-            borderColor: palette.primary,
-            opacity: 0.92,
-            transform: [
-              { rotate: spinCW },
-              { scaleX: 0.96 },
-              { scaleY: 1.04 },
-              { scale: ribbonScale },
-            ],
-          },
-        ]}
-      />
-
-      {/* Bright inner core shimmer ring */}
-      <Animated.View
-        style={[
-          styles.circle,
-          {
-            width: innerRing,
-            height: innerRing,
-            borderRadius: innerRing / 2,
-            borderWidth: Math.max(1, stroke * 0.55),
-            borderColor: palette.highlight,
-            opacity: 0.62,
-            transform: [
-              { rotate: spinFastCW },
-              { scaleX: 1.028 },
-              { scaleY: 0.972 },
-              { scale: ribbonScale },
-            ],
-          },
-        ]}
-      />
-    </View>
-  );
-});
-
 /**
  * LiveKit Agents UI-compatible `AgentAudioVisualizerAura` adapted for React Native.
- * - Supports real connection status colors (Green, Blue, Yellow, Red) with smooth
- *   60fps GPU cross-fade transitions.
- * - Optional `cycleDemoColors` mode smoothly showcases all connection colors on
- *   onboarding and sign-up screens.
- * - Renders perfectly centered with generous unclipped glow bounds in all directions.
+ * - Zero-flicker color transitions: smoothly interpolates RGB border/glow colors
+ *   directly on a single persistent set of rings (no layer mount/unmount or alpha dips).
+ * - Continuous unbroken 60fps native GPU transforms (rotation + breathing) isolated
+ *   on parent Animated.Views so color transitions never interrupt or stutter motion.
+ * - Uniform 360° borderWidth inside an unclipped canvas for seamless glow in all directions.
  */
 export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
   size = 'xl',
@@ -186,37 +63,39 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
     ? AURA_STATUS_PALETTES[AURA_DEMO_SEQUENCE[demoIndex]]
     : resolveAuraPalette(connectionStatus, color);
 
-  // Smooth GPU cross-fade whenever the active palette changes
-  const [displayedPalette, setDisplayedPalette] = useState<AuraColorPalette>(targetPalette);
-  const [previousPalette, setPreviousPalette] = useState<AuraColorPalette | null>(null);
-  const crossfade = useRef(new Animated.Value(1)).current;
+  // Smooth, flicker-free RGB interpolation between previous and target palettes
+  const [palettePair, setPalettePair] = useState<{
+    from: AuraColorPalette;
+    to: AuraColorPalette;
+  }>(() => ({ from: targetPalette, to: targetPalette }));
+  const colorProgress = useRef(new Animated.Value(1)).current;
+  const activeToRef = useRef<AuraColorPalette>(targetPalette);
 
   useEffect(() => {
-    if (targetPalette.primary === displayedPalette.primary) {
+    if (targetPalette.primary === activeToRef.current.primary) {
       return;
     }
-    setPreviousPalette(displayedPalette);
-    setDisplayedPalette(targetPalette);
-    crossfade.setValue(0);
-    Animated.timing(crossfade, {
-      toValue: 1,
-      duration: 620,
-      easing: Easing.inOut(Easing.cubic),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) {
-        setPreviousPalette(null);
-      }
-    });
-  }, [crossfade, displayedPalette, targetPalette]);
+    const prevTo = activeToRef.current;
+    activeToRef.current = targetPalette;
+    colorProgress.stopAnimation();
+    colorProgress.setValue(0);
+    setPalettePair({ from: prevTo, to: targetPalette });
 
-  // Continuous unbroken GPU rotation loops (never snap on state change)
+    Animated.timing(colorProgress, {
+      toValue: 1,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [colorProgress, targetPalette]);
+
+  // Continuous unbroken native GPU rotation loops
   const rotA = useRef(new Animated.Value(0)).current;
   const rotB = useRef(new Animated.Value(0)).current;
   const rotC = useRef(new Animated.Value(0)).current;
   const breathe = useRef(new Animated.Value(0)).current;
   const energy = useRef(new Animated.Value(0.14)).current;
-  const masterOpacity = useRef(new Animated.Value(0.82)).current;
+  const masterOpacity = useRef(new Animated.Value(0.84)).current;
 
   useEffect(() => {
     const loopA = Animated.loop(
@@ -306,18 +185,18 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
           ? 0.94
           : state === 'listening'
             ? 0.88
-            : 0.76;
+            : 0.78;
 
     Animated.parallel([
       Animated.timing(energy, {
         toValue: targetEnergy,
-        duration: state === 'speaking' ? 140 : 380,
+        duration: state === 'speaking' ? 140 : 340,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(masterOpacity, {
         toValue: targetAlpha,
-        duration: 360,
+        duration: 320,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
@@ -361,21 +240,39 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
 
   const haloOpacity = energy.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.34, 0.9],
+    outputRange: [0.32, 0.85],
   });
 
-  const prevOpacity = crossfade.interpolate({
+  // Smooth RGB color channels (no flicker, no alpha dip at midpoint)
+  const primaryColor = colorProgress.interpolate({
     inputRange: [0, 1],
-    outputRange: [1, 0],
+    outputRange: [palettePair.from.primary, palettePair.to.primary],
+  });
+  const secondaryColor = colorProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [palettePair.from.secondary, palettePair.to.secondary],
+  });
+  const highlightColor = colorProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [palettePair.from.highlight, palettePair.to.highlight],
+  });
+  const glowColor = colorProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [palettePair.from.glowRgba, palettePair.to.glowRgba],
   });
 
   const ringSize = RING_DIAMETERS[size];
-  const glowBlur =
-    size === 'xs' ? 6 : size === 'sm' ? 14 : size === 'md' ? 22 : 32;
+  const outerRing = Math.round(ringSize * 0.99);
+  const midRing = Math.round(ringSize * 0.95);
+  const innerRing = Math.round(ringSize * 0.91);
+  const haloOuter = Math.round(ringSize * 1.14);
+  const haloMid = Math.round(ringSize * 1.06);
+
   const stroke =
     size === 'xs' ? 1.5 : size === 'sm' ? 2.4 : size === 'md' ? 3.4 : 4.4;
+  const shiftIntensity = Math.max(0.1, Math.min(0.6, colorShift));
   // Generous unclipped margin on every side so glow never hits a container edge
-  const canvasSize = ringSize + glowBlur * 2 + 20;
+  const canvasSize = haloOuter + 36;
 
   return (
     <Animated.View
@@ -384,38 +281,127 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
         { width: canvasSize, height: canvasSize, opacity: masterOpacity },
         style,
       ]}
+      pointerEvents="none"
     >
-      {previousPalette ? (
-        <Animated.View style={[styles.fadeWrap, { opacity: prevOpacity }]}>
-          <AuraRibbonSet
-            palette={previousPalette}
-            ringSize={ringSize}
-            glowBlur={glowBlur}
-            stroke={stroke}
-            colorShift={colorShift}
-            spinCW={spinCW}
-            spinCCW={spinCCW}
-            spinFastCW={spinFastCW}
-            haloScale={haloScale}
-            ribbonScale={ribbonScale}
-            haloOpacity={haloOpacity}
-          />
-        </Animated.View>
-      ) : null}
+      {/* Layered soft 360° ambient glow rings (smoothly RGB-interpolated, zero clipping) */}
+      <Animated.View
+        style={[
+          styles.motionLayer,
+          { opacity: haloOpacity, transform: [{ scale: haloScale }] },
+        ]}
+      >
+        <Animated.View
+          style={[
+            styles.circle,
+            {
+              width: haloOuter,
+              height: haloOuter,
+              borderRadius: haloOuter / 2,
+              borderWidth: Math.max(4, stroke * 3.2),
+              borderColor: glowColor,
+              opacity: 0.14,
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.circle,
+            {
+              width: haloMid,
+              height: haloMid,
+              borderRadius: haloMid / 2,
+              borderWidth: Math.max(3, stroke * 2.0),
+              borderColor: glowColor,
+              opacity: 0.28,
+            },
+          ]}
+        />
+      </Animated.View>
 
-      <Animated.View style={[styles.fadeWrap, { opacity: crossfade }]}>
-        <AuraRibbonSet
-          palette={displayedPalette}
-          ringSize={ringSize}
-          glowBlur={glowBlur}
-          stroke={stroke}
-          colorShift={colorShift}
-          spinCW={spinCW}
-          spinCCW={spinCCW}
-          spinFastCW={spinFastCW}
-          haloScale={haloScale}
-          ribbonScale={ribbonScale}
-          haloOpacity={haloOpacity}
+      {/* Secondary shifted organic elliptical ring (GPU motion wrapper + RGB ring child) */}
+      <Animated.View
+        style={[
+          styles.motionLayer,
+          {
+            opacity: 0.48 + shiftIntensity * 0.65,
+            transform: [
+              { rotate: spinCCW },
+              { scaleX: 1.045 },
+              { scaleY: 0.955 },
+              { scale: ribbonScale },
+            ],
+          },
+        ]}
+      >
+        <Animated.View
+          style={[
+            styles.circle,
+            {
+              width: outerRing,
+              height: outerRing,
+              borderRadius: outerRing / 2,
+              borderWidth: stroke * 1.15,
+              borderColor: secondaryColor,
+            },
+          ]}
+        />
+      </Animated.View>
+
+      {/* Primary luminous undulating energy ring */}
+      <Animated.View
+        style={[
+          styles.motionLayer,
+          {
+            opacity: 0.94,
+            transform: [
+              { rotate: spinCW },
+              { scaleX: 0.96 },
+              { scaleY: 1.04 },
+              { scale: ribbonScale },
+            ],
+          },
+        ]}
+      >
+        <Animated.View
+          style={[
+            styles.circle,
+            {
+              width: midRing,
+              height: midRing,
+              borderRadius: midRing / 2,
+              borderWidth: stroke,
+              borderColor: primaryColor,
+            },
+          ]}
+        />
+      </Animated.View>
+
+      {/* Bright inner core shimmer ring */}
+      <Animated.View
+        style={[
+          styles.motionLayer,
+          {
+            opacity: 0.65,
+            transform: [
+              { rotate: spinFastCW },
+              { scaleX: 1.028 },
+              { scaleY: 0.972 },
+              { scale: ribbonScale },
+            ],
+          },
+        ]}
+      >
+        <Animated.View
+          style={[
+            styles.circle,
+            {
+              width: innerRing,
+              height: innerRing,
+              borderRadius: innerRing / 2,
+              borderWidth: Math.max(1, stroke * 0.55),
+              borderColor: highlightColor,
+            },
+          ]}
         />
       </Animated.View>
     </Animated.View>
@@ -428,18 +414,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'visible',
   },
-  fadeWrap: {
+  motionLayer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ribbonLayer: {
-    width: '100%',
-    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },

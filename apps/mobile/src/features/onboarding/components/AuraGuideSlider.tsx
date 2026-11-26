@@ -7,192 +7,164 @@ import {
   AURA_STATUS_PALETTES,
   AuraConnectionStatus,
 } from '../../../components/auraTheme';
-import { BackArrowIcon } from './OnboardingIcons';
 
 interface AuraGuideSliderProps {
   onComplete: () => void;
 }
 
-const TOTAL_SLIDES = 3;
+type DemoStateKey = Exclude<AuraConnectionStatus, 'idle'>;
 
-function SlideDots({ current }: { current: number }) {
-  return (
-    <View style={styles.dotsRow}>
-      {Array.from({ length: TOTAL_SLIDES }).map((_, i) => (
-        <View key={i} style={[styles.dot, i === current && styles.dotActive]} />
-      ))}
-    </View>
-  );
-}
+const STATE_EXPLANATIONS: Record<
+  DemoStateKey,
+  { title: string; subtitle: string; auraState: 'connecting' | 'listening' | 'speaking' }
+> = {
+  connecting: {
+    title: 'Connecting',
+    subtitle: 'Green means Aura is establishing your live connection.',
+    auraState: 'connecting',
+  },
+  connected: {
+    title: 'Connected',
+    subtitle: 'Blue means Kallie is ready. Tap Aura anytime to talk.',
+    auraState: 'speaking',
+  },
+  weak: {
+    title: 'Weak connection',
+    subtitle: 'Yellow means your internet signal is unstable.',
+    auraState: 'listening',
+  },
+  disconnected: {
+    title: 'Disconnected',
+    subtitle: 'Red means the connection was lost. Tap to reconnect.',
+    auraState: 'listening',
+  },
+};
 
 /**
- * Post-login interactive Aura guide matching the dark minimal onboarding style:
- * 1. How Aura works
- * 2. Live interactive color legend (Green, Blue, Yellow, Red)
- * 3. How to tap Aura to start/end calls and open chat
+ * Single centered Aura onboarding explanation:
+ * - Reuses ONE Aura visual at the center and smoothly shifts its color through
+ *   all 4 live connection states (Green -> Blue -> Yellow -> Red).
+ * - Disables Continue until the user has viewed every state (no immediate skip).
  */
 export function AuraGuideSlider({ onComplete }: AuraGuideSliderProps) {
-  const [slide, setSlide] = useState<0 | 1 | 2>(0);
-  const [selectedStatus, setSelectedStatus] =
-    useState<Exclude<AuraConnectionStatus, 'idle'>>('connecting');
-  const [userPickedColor, setUserPickedColor] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [viewedKeys, setViewedKeys] = useState<DemoStateKey[]>(['connecting']);
+  const [manualOverride, setManualOverride] = useState(false);
 
-  // Gently cycle through the 4 status colors on Slide 2 until the user taps one
-  useEffect(() => {
-    if (slide !== 1 || userPickedColor) return;
-    const timer = setInterval(() => {
-      setSelectedStatus((prev) => {
-        const idx = AURA_DEMO_SEQUENCE.indexOf(prev);
-        return AURA_DEMO_SEQUENCE[(idx + 1) % AURA_DEMO_SEQUENCE.length];
-      });
-    }, 2200);
-    return () => clearInterval(timer);
-  }, [slide, userPickedColor]);
+  const activeKey = AURA_DEMO_SEQUENCE[activeIndex];
+  const palette = AURA_STATUS_PALETTES[activeKey];
+  const copy = STATE_EXPLANATIONS[activeKey];
+  const allViewed = viewedKeys.length >= AURA_DEMO_SEQUENCE.length;
 
-  const goBack = () => {
-    setSlide((prev) => (prev > 0 ? ((prev - 1) as 0 | 1 | 2) : 0));
+  const selectIndex = (idx: number, isManual = false) => {
+    const key = AURA_DEMO_SEQUENCE[idx];
+    setActiveIndex(idx);
+    if (isManual) {
+      setManualOverride(true);
+    }
+    setViewedKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
   };
 
-  const goNext = () => {
-    if (slide < 2) {
-      setSlide((slide + 1) as 0 | 1 | 2);
-    } else {
+  // Gently step through all 4 states automatically unless the user takes manual control
+  useEffect(() => {
+    if (manualOverride || allViewed) return;
+    const timer = setTimeout(() => {
+      const nextIdx = activeIndex + 1;
+      if (nextIdx < AURA_DEMO_SEQUENCE.length) {
+        selectIndex(nextIdx, false);
+      }
+    }, 2400);
+    return () => clearTimeout(timer);
+  }, [activeIndex, allViewed, manualOverride]);
+
+  const handleAdvanceOrContinue = () => {
+    if (allViewed) {
       onComplete();
+      return;
+    }
+    const nextUnseenIdx = AURA_DEMO_SEQUENCE.findIndex(
+      (k) => !viewedKeys.includes(k),
+    );
+    if (nextUnseenIdx >= 0) {
+      selectIndex(nextUnseenIdx, true);
     }
   };
 
-  const activePalette = AURA_STATUS_PALETTES[selectedStatus];
-
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.topBar}>
-        {slide > 0 ? (
-          <Pressable
-            onPress={goBack}
-            hitSlop={10}
-            style={({ pressed }) => [
-              styles.backCircle,
-              pressed && styles.surfacePressed,
-            ]}
-            accessibilityLabel="Previous tip"
-          >
-            <BackArrowIcon color="#FFFFFF" />
-          </Pressable>
-        ) : (
-          <View style={styles.topSpacer} />
-        )}
+      <View style={styles.stage}>
+        <Pressable
+          onPress={() => selectIndex((activeIndex + 1) % AURA_DEMO_SEQUENCE.length, true)}
+          style={styles.auraSlot}
+          accessibilityLabel="Preview next Aura color state"
+        >
+          <AgentAudioVisualizerAura
+            size="xl"
+            connectionStatus={activeKey}
+            state={copy.auraState}
+            audioLevel={activeKey === 'connected' ? 0.52 : 0.25}
+          />
+        </Pressable>
+
+        <View style={styles.textBlock}>
+          <Text style={styles.title}>{copy.title}</Text>
+          <Text style={styles.subtitle}>{copy.subtitle}</Text>
+        </View>
       </View>
 
-      {slide === 0 ? (
-        <View style={styles.stage}>
-          <View style={styles.auraSlot}>
-            <AgentAudioVisualizerAura
-              size="lg"
-              connectionStatus="connected"
-              state="speaking"
-              audioLevel={0.62}
-            />
-          </View>
-          <Text style={styles.title}>Meet Aura</Text>
-          <Text style={styles.subtitle}>
-            {'Your live voice link to Kallie.\nIt pulses as she listens, thinks, and speaks.'}
-          </Text>
-        </View>
-      ) : null}
-
-      {slide === 1 ? (
-        <View style={styles.stage}>
-          <View style={styles.auraSlotCompact}>
-            <AgentAudioVisualizerAura
-              size="md"
-              connectionStatus={selectedStatus}
-              state={selectedStatus === 'connecting' ? 'connecting' : 'listening'}
-              audioLevel={0.35}
-            />
-          </View>
-
-          <Text style={styles.title}>Connection colors</Text>
-          <Text style={styles.subtitle}>
-            {`${activePalette.label} — ${activePalette.description}`}
-          </Text>
-
-          <View style={styles.legendGrid}>
-            {AURA_DEMO_SEQUENCE.map((statusKey) => {
-              const item = AURA_STATUS_PALETTES[statusKey];
-              const isSelected = selectedStatus === statusKey;
-              return (
-                <Pressable
-                  key={statusKey}
-                  style={({ pressed }) => [
-                    styles.legendPill,
-                    isSelected && {
-                      borderColor: item.primary,
-                      backgroundColor: '#16161A',
-                    },
-                    pressed && styles.surfacePressed,
-                  ]}
-                  onPress={() => {
-                    setUserPickedColor(true);
-                    setSelectedStatus(statusKey);
-                  }}
-                >
-                  <View
-                    style={[styles.colorDot, { backgroundColor: item.primary }]}
-                  />
-                  <View style={styles.legendTextWrap}>
-                    <Text style={styles.legendLabel}>{item.label}</Text>
-                    <Text style={styles.legendDesc} numberOfLines={1}>
-                      {item.description}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      ) : null}
-
-      {slide === 2 ? (
-        <View style={styles.stage}>
-          <View style={styles.auraSlot}>
-            <AgentAudioVisualizerAura
-              size="lg"
-              connectionStatus="connected"
-              state="idle"
-              audioLevel={0.14}
-            />
-          </View>
-          <Text style={styles.title}>Tap Aura to talk</Text>
-          <Text style={styles.subtitle}>
-            {'Tap once to connect, speak naturally,\nor open chat anytime during a call.'}
-          </Text>
-        </View>
-      ) : null}
-
       <View style={styles.footer}>
-        <SlideDots current={slide} />
+        {/* Minimal interactive color dots representing all 4 states */}
+        <View style={styles.dotsRow}>
+          {AURA_DEMO_SEQUENCE.map((key, idx) => {
+            const item = AURA_STATUS_PALETTES[key];
+            const isActive = idx === activeIndex;
+            const isViewed = viewedKeys.includes(key);
+            return (
+              <Pressable
+                key={key}
+                onPress={() => selectIndex(idx, true)}
+                hitSlop={10}
+                style={[
+                  styles.colorDot,
+                  {
+                    backgroundColor: item.primary,
+                    opacity: isActive ? 1 : isViewed ? 0.55 : 0.24,
+                  },
+                  isActive && styles.colorDotActive,
+                ]}
+                accessibilityLabel={`${item.label}: ${STATE_EXPLANATIONS[key].title}`}
+              />
+            );
+          })}
+        </View>
 
         <Pressable
           style={({ pressed }) => [
-            styles.primaryBtn,
-            pressed && styles.primaryBtnPressed,
+            styles.continueBtn,
+            !allViewed && styles.continueBtnDisabled,
+            pressed && allViewed && styles.continueBtnPressed,
           ]}
-          onPress={goNext}
+          onPress={handleAdvanceOrContinue}
+          disabled={!allViewed}
+          accessibilityState={{ disabled: !allViewed }}
         >
-          <Text style={styles.primaryBtnText}>
-            {slide === 2 ? 'Start talking' : 'Continue'}
+          <Text
+            style={[
+              styles.continueBtnText,
+              !allViewed && styles.continueBtnTextDisabled,
+            ]}
+          >
+            Continue
           </Text>
         </Pressable>
 
-        <Pressable
-          style={styles.skipRow}
-          onPress={onComplete}
-          hitSlop={10}
-        >
-          <Text style={styles.skipText}>
-            {slide === 2 ? ' ' : 'Skip'}
+        <View style={styles.hintRow}>
+          <Text style={styles.hintText}>
+            {allViewed
+              ? 'Tap any color above to review'
+              : `${viewedKeys.length} of ${AURA_DEMO_SEQUENCE.length} states`}
           </Text>
-        </Pressable>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -205,146 +177,88 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 24,
   },
-  topBar: {
-    height: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingTop: 6,
-  },
-  topSpacer: {
-    width: 40,
-    height: 40,
-  },
-  backCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#111111',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  surfacePressed: {
-    backgroundColor: '#18181B',
-  },
   stage: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    maxWidth: 380,
+    maxWidth: 360,
     alignSelf: 'center',
   },
   auraSlot: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 14,
   },
-  auraSlotCompact: {
+  textBlock: {
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
+    marginTop: 18,
+    minHeight: 84,
+    paddingHorizontal: 12,
   },
   title: {
     color: '#FFFFFF',
-    fontSize: 31,
+    fontSize: 28,
     fontWeight: '700',
-    letterSpacing: -0.7,
-    lineHeight: 37,
+    letterSpacing: -0.6,
     textAlign: 'center',
   },
   subtitle: {
     color: '#71717A',
     fontSize: 14,
+    lineHeight: 21,
     marginTop: 10,
     textAlign: 'center',
-    lineHeight: 21,
-  },
-  legendGrid: {
-    width: '100%',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 10,
-    marginTop: 24,
-  },
-  legendPill: {
-    width: '48.4%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#111111',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.09)',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  colorDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  legendTextWrap: {
-    flex: 1,
-    gap: 1,
-  },
-  legendLabel: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  legendDesc: {
-    color: '#71717A',
-    fontSize: 11,
   },
   footer: {
     width: '100%',
     maxWidth: 380,
     alignSelf: 'center',
     gap: 16,
-    paddingTop: 12,
+    paddingTop: 8,
   },
   dotsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
+    gap: 12,
   },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#27272A',
+  colorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
-  dotActive: {
-    width: 18,
-    backgroundColor: '#FFFFFF',
+  colorDotActive: {
+    width: 24,
+    borderRadius: 5,
   },
-  primaryBtn: {
+  continueBtn: {
     backgroundColor: '#FFFFFF',
     borderRadius: 999,
     height: 54,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primaryBtnPressed: {
+  continueBtnDisabled: {
+    backgroundColor: '#18181B',
+  },
+  continueBtnPressed: {
     backgroundColor: '#E4E4E7',
   },
-  primaryBtnText: {
+  continueBtnText: {
     color: '#000000',
     fontSize: 15,
     fontWeight: '600',
   },
-  skipRow: {
-    height: 22,
+  continueBtnTextDisabled: {
+    color: '#52525B',
+  },
+  hintRow: {
+    height: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  skipText: {
-    color: '#71717A',
-    fontSize: 13,
+  hintText: {
+    color: '#52525B',
+    fontSize: 12,
   },
 });

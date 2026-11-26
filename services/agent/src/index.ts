@@ -5,8 +5,13 @@ import { runKallieVoiceSession } from './agentSession.js';
 
 export default defineAgent({
   prewarm: async () => {
-    // Keep dependencies warm in idle worker processes for near-instant call joins
-    await import('@livekit/agents-plugin-google');
+    // Keep heavy dependencies warm in idle worker processes to avoid
+    // event-loop stalls during initial call audio setup
+    await Promise.all([
+      import('@livekit/agents-plugin-google'),
+      import('@supabase/supabase-js'),
+      import('./agentSession.js'),
+    ]);
   },
   entry: async (ctx: JobContext) => {
     await runKallieVoiceSession(ctx);
