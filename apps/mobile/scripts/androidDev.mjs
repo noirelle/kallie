@@ -104,13 +104,32 @@ function buildEnv(extraEnv = {}) {
   };
 }
 
+function resolveBin(command, env) {
+  if (!IS_WIN) return command;
+  if (command === 'npx') return 'npx.cmd';
+  if (command === 'gradlew.bat' || path.isAbsolute(command)) return command;
+  const exts = ['.exe', '.cmd', '.bat'];
+  const dirs = (env.PATH || '').split(PATH_SEP).filter(Boolean);
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const full = path.join(dir, command.endsWith(ext) ? command : `${command}${ext}`);
+      if (fs.existsSync(full)) return full;
+    }
+  }
+  return command;
+}
+
 function runCommand(command, args, options = {}) {
+  const env = options.env || buildEnv();
+  const resolved = resolveBin(command, env);
+  const needsShell = IS_WIN && /\.(cmd|bat)$/i.test(resolved);
+
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
+    const child = spawn(resolved, args, {
       cwd: options.cwd || MOBILE_DIR,
-      env: options.env || buildEnv(),
+      env,
       stdio: 'inherit',
-      shell: IS_WIN,
+      shell: needsShell,
     });
     child.on('exit', (code) => resolve(code ?? 1));
     child.on('error', (err) => {
@@ -121,10 +140,12 @@ function runCommand(command, args, options = {}) {
 }
 
 function probe(command, args, env) {
-  const res = spawnSync(command, args, {
+  const resolved = resolveBin(command, env);
+  const needsShell = IS_WIN && /\.(cmd|bat)$/i.test(resolved);
+  const res = spawnSync(resolved, args, {
     env,
     encoding: 'utf8',
-    shell: IS_WIN,
+    shell: needsShell,
   });
   return {
     ok: res.status === 0,
