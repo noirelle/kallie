@@ -45,7 +45,7 @@ services:
       args:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-        NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
+        NEXT_PUBLIC_API_URL: https://${WEB_DOMAIN}/api
     container_name: kallie-web
     restart: unless-stopped
     env_file:
@@ -72,7 +72,6 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      - API_DOMAIN=${API_DOMAIN}
       - WEB_DOMAIN=${WEB_DOMAIN}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro

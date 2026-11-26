@@ -9,7 +9,16 @@ APP_DIR="${APP_DIR:-/opt/kallie}"
 REPO_URL="${REPO_URL:-https://github.com/noirelle/kallie.git}"
 BRANCH="${BRANCH:-main}"
 
-echo "==> [1/6] Checking Docker & Compose installation..."
+echo "==> [1/6] Checking 2GB swap (important for t3.micro 1GB RAM) & Docker..."
+if [ ! -f /swapfile ] && [ "$(free -m | awk '/^Swap:/ {print $2}')" -lt 1024 ]; then
+  sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile
+  sudo swapon /swapfile
+  grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+  echo "Swap enabled: $(free -h | awk '/^Swap:/ {print $2}')"
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -y
   sudo apt-get install -y ca-certificates curl gnupg

@@ -2,12 +2,14 @@
   email admin@{$WEB_DOMAIN}
 }
 
-{$API_DOMAIN} {
-  encode zstd gzip
-  reverse_proxy api:3001
-}
-
 {$WEB_DOMAIN} {
   encode zstd gzip
-  reverse_proxy web:3000
+
+  handle_path /api/* {
+    reverse_proxy api:3001
+  }
+
+  handle {
+    reverse_proxy web:3000
+  }
 }

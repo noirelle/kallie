@@ -49,11 +49,11 @@ echo "==> [Smoke 4/4] Checking public HTTPS endpoints (if DNS configured)..."
 if [ -f ".env" ]; then
   # shellcheck disable=SC1091
   set -a && source .env && set +a
-  if [ -n "${API_DOMAIN:-}" ] && [ "${API_DOMAIN}" != "api.yourdomain.com" ]; then
-    if curl -fsS --max-time 10 "https://${API_DOMAIN}/health" >/dev/null; then
-      echo "PASS: https://${API_DOMAIN}/health reachable over HTTPS."
+  if [ -n "${WEB_DOMAIN:-}" ] && [ "${WEB_DOMAIN}" != "kallie.yourdomain.com" ]; then
+    if curl -fsS --max-time 10 "https://${WEB_DOMAIN}/api/health" >/dev/null; then
+      echo "PASS: https://${WEB_DOMAIN}/api/health reachable over HTTPS."
     else
-      echo "WARN: https://${API_DOMAIN}/health not reachable yet (DNS/SSL may still be propagating)."
+      echo "WARN: https://${WEB_DOMAIN}/api/health not reachable yet (DNS/SSL may still be propagating)."
     fi
   fi
 fi

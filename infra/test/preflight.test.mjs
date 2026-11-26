@@ -50,12 +50,12 @@ describe('Infra Preflight Checks', () => {
     assert.ok(compose.includes('condition: service_healthy'), 'Dependent services must wait for api health');
   });
 
-  it('routes API_DOMAIN and WEB_DOMAIN cleanly in Caddyfile', () => {
+  it('routes WEB_DOMAIN web and /api traffic cleanly in Caddyfile', () => {
     const caddyfile = readRootFile('infra/caddy/Caddyfile');
 
-    assert.ok(caddyfile.includes('{$API_DOMAIN}'), 'Caddyfile missing {$API_DOMAIN}');
-    assert.ok(caddyfile.includes('reverse_proxy api:3001'), 'Caddyfile must proxy API to api:3001');
     assert.ok(caddyfile.includes('{$WEB_DOMAIN}'), 'Caddyfile missing {$WEB_DOMAIN}');
+    assert.ok(caddyfile.includes('handle_path /api/*'), 'Caddyfile must route /api/*');
+    assert.ok(caddyfile.includes('reverse_proxy api:3001'), 'Caddyfile must proxy API to api:3001');
     assert.ok(caddyfile.includes('reverse_proxy web:3000'), 'Caddyfile must proxy Web to web:3000');
   });
 
