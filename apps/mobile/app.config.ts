@@ -4,10 +4,13 @@ const enableAndroidFcm = process.env.EXPO_ENABLE_ANDROID_FCM === 'true';
 const enableIosVoip = process.env.EXPO_ENABLE_IOS_VOIP === 'true';
 const githubRepo = process.env.EXPO_PUBLIC_GITHUB_REPO || '';
 
+const EAS_PROJECT_ID = '94c7ad06-4859-418e-a5df-a3b69b3082a8';
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Kallie',
   slug: 'kallie',
+  owner: 'noirelle',
   scheme: 'kallie',
   version: '0.1.0',
   orientation: 'portrait',
@@ -58,6 +61,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   updates: {
     enabled: true,
+    url: `https://u.expo.dev/${EAS_PROJECT_ID}`,
     checkAutomatically: 'ON_LOAD',
     fallbackToCacheTimeout: 0,
   },
@@ -68,5 +72,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     enableAndroidFcm,
     enableIosVoip,
     githubRepo,
+    eas: {
+      projectId: EAS_PROJECT_ID,
+    },
   },
 });
