@@ -1,0 +1,18 @@
+{
+  "name": "kallie",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kallie — Scheduled AI Voice Calling App (Expo + NestJS + LiveKit + Supabase)",
+  "scripts": {
+    "install:all": "npm --prefix services/api install && npm --prefix services/agent install && npm --prefix apps/web install",
+    "dev:api": "npm --prefix services/api run start:dev",
+    "dev:agent": "npm --prefix services/agent run dev",
+    "dev:web": "npm --prefix apps/web run dev",
+    "dev:mobile": "npm --prefix apps/mobile run start",
+    "build:api": "npm --prefix services/api run build",
+    "build:agent": "npm --prefix services/agent run build",
+    "build:web": "npm --prefix apps/web run build",
+    "typecheck:mobile": "npm --prefix apps/mobile run typecheck",
+    "typecheck:all": "npm run build:api && npm run build:agent && npm run build:web"
+  }
+}
