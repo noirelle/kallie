@@ -12,7 +12,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'kallie',
   owner: 'noirelle',
   scheme: 'kallie',
-  version: '0.1.1',
+  version: '0.1.2',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'dark',
@@ -49,8 +49,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
             'USE_FULL_SCREEN_INTENT',
             'FOREGROUND_SERVICE_PHONE_CALL',
             'POST_NOTIFICATIONS',
-            'READ_PHONE_NUMBERS',
-            'CALL_PHONE',
+            'MANAGE_OWN_CALLS',
           ]
         : []),
     ],
@@ -58,14 +57,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       ? { googleServicesFile: process.env.GOOGLE_SERVICES_JSON || './google-services.json' }
       : {}),
   },
-  web: {
-    bundler: 'metro',
-    output: 'single',
-  },
   plugins: [
     'expo-router',
     '@livekit/react-native-expo-plugin',
     '@config-plugins/react-native-webrtc',
+    './plugins/withCallKeepAndroid',
+    './plugins/withAndroidOptimization',
     ...(enableAndroidFcm ? ['@react-native-firebase/app'] : []),
   ],
   updates: {

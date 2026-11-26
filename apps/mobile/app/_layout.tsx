@@ -1,7 +1,8 @@
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Slot, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import React, { Component, ReactNode, useCallback, useEffect } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { IncomingCallModal } from '../src/features/calling/components/IncomingCallModal';
 import { useIncomingCall } from '../src/features/calling/hooks/useIncomingCall';
@@ -17,10 +18,40 @@ import { useAutoUpdate } from '../src/features/updates/hooks/useAutoUpdate';
 registerLiveKitGlobals();
 registerBackgroundFcmHandler();
 
-export default function RootLayout() {
+class AppErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean; message: string }
+> {
+  state = { hasError: false, message: '' };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error?.message || 'Unexpected error' };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>Something went wrong</Text>
+          <Text style={styles.errorDetail}>{this.state.message}</Text>
+          <Pressable
+            style={styles.retryBtn}
+            onPress={() => this.setState({ hasError: false, message: '' })}
+          >
+            <Text style={styles.retryBtnText}>TRY AGAIN</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function RootLayoutContent() {
   const { user, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const rootNavigationState = useRootNavigationState();
   const autoUpdate = useAutoUpdate();
 
   const handleNativeAccepted = useCallback(
@@ -39,8 +70,10 @@ export default function RootLayout() {
     declineIncomingCall,
   } = useIncomingCall(user?.id);
 
+  const isNavReady = Boolean(rootNavigationState?.key);
+
   useEffect(() => {
-    if (loading) return;
+    if (loading || !isNavReady) return;
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!user && !inAuthGroup) {
@@ -48,7 +81,7 @@ export default function RootLayout() {
     } else if (user && inAuthGroup) {
       router.replace('/');
     }
-  }, [loading, router, segments, user]);
+  }, [isNavReady, loading, router, segments, user]);
 
   const handleAccept = async () => {
     const joinData = await acceptIncomingCall();
@@ -57,19 +90,15 @@ export default function RootLayout() {
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loader}>
-        <ActivityIndicator size="small" color="#1FD5F9" />
-        <StatusBar style="light" />
-      </View>
-    );
-  }
-
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
       <Slot />
+      {loading ? (
+        <View style={styles.loaderOverlay}>
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        </View>
+      ) : null}
       <AppUpdateBanner
         state={autoUpdate.state}
         onApply={autoUpdate.applyUpdate}
@@ -85,15 +114,60 @@ export default function RootLayout() {
   );
 }
 
+export default function RootLayout() {
+  return (
+    <SafeAreaProvider>
+      <AppErrorBoundary>
+        <RootLayoutContent />
+      </AppErrorBoundary>
+    </SafeAreaProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#000000',
   },
-  loader: {
+  loaderOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  errorContainer: {
     flex: 1,
     backgroundColor: '#000000',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 24,
+  },
+  errorTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  errorDetail: {
+    color: '#A1A1AA',
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryBtn: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  retryBtnText: {
+    color: '#000000',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
   },
 });

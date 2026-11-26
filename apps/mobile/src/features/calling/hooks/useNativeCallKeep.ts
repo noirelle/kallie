@@ -73,7 +73,7 @@ async function ensureCallKeepSetup(): Promise<CallKeepModule | null> {
         cancelButton: 'Cancel',
         okButton: 'Allow',
         additionalPermissions: [],
-        selfManaged: false,
+        selfManaged: true,
         foregroundService: {
           channelId: 'com.kallie.app.calls',
           channelName: 'Kallie Incoming Calls',

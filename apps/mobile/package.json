@@ -1,10 +1,9 @@
 {
   "name": "@kallie/mobile",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "main": "expo-router/entry",
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.2",
-    "@expo/vector-icons": "^15.0.2",
     "@livekit/react-native": "^3.2.0",
     "@livekit/react-native-expo-plugin": "^1.2.0",
     "@livekit/react-native-webrtc": "^150.2.0",
@@ -20,12 +19,10 @@
     "expo-updates": "~58.0.22",
     "livekit-client": "^2.25.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
     "react-native": "0.88.1",
     "react-native-callkeep": "^4.6.1",
     "react-native-safe-area-context": "~5.11.1",
-    "react-native-screens": "~4.30.1",
-    "react-native-web": "^0.21.4"
+    "react-native-screens": "~4.30.1"
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
@@ -33,8 +30,8 @@
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit"
   },

@@ -1,9 +1,9 @@
-import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CallConnectionState } from '../hooks/useLiveKitCall';
 import { AudioBarsVisualizer } from './AudioBarsVisualizer';
+import { HangupIcon, MicIcon, SpeakerIcon } from './CallIcons';
 
 interface ActiveCallViewProps {
   status: CallConnectionState;
@@ -58,11 +58,7 @@ export function ActiveCallView({
           onPress={onToggleMute}
           accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
         >
-          <Ionicons
-            name={isMuted ? 'mic-off' : 'mic'}
-            size={22}
-            color={isMuted ? '#000000' : '#FAFAFA'}
-          />
+          <MicIcon color={isMuted ? '#000000' : '#FAFAFA'} muted={isMuted} />
         </Pressable>
 
         {Platform.OS !== 'web' ? (
@@ -71,11 +67,7 @@ export function ActiveCallView({
             onPress={onToggleSpeaker}
             accessibilityLabel={isSpeakerOn ? 'Switch to earpiece' : 'Switch to speaker'}
           >
-            <Ionicons
-              name={isSpeakerOn ? 'volume-high' : 'volume-low'}
-              size={22}
-              color={isSpeakerOn ? '#000000' : '#FAFAFA'}
-            />
+            <SpeakerIcon color={isSpeakerOn ? '#000000' : '#FAFAFA'} active={isSpeakerOn} />
           </Pressable>
         ) : null}
 
@@ -84,7 +76,7 @@ export function ActiveCallView({
           onPress={onEndCall}
           accessibilityLabel="End call"
         >
-          <Ionicons name="call" size={20} color="#FFFFFF" style={styles.hangupIcon} />
+          <HangupIcon color="#FFFFFF" />
           <Text style={styles.endBtnText}>END CALL</Text>
         </Pressable>
       </View>
@@ -166,9 +158,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     height: 48,
     borderRadius: 999,
-  },
-  hangupIcon: {
-    transform: [{ rotate: '135deg' }],
   },
   endBtnText: {
     color: '#FFFFFF',

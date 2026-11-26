@@ -131,6 +131,34 @@ PYEOF
     PID_RELAUNCH=$(adb shell pidof "${PKG}" | tr -d '\r')
     echo "PID_AFTER_RELAUNCH='${PID_RELAUNCH}'"
     adb exec-out screencap -p > emulator-screen-relaunch.png || true
+
+    # Also test tapping START CALL to verify call screen / LiveKit initialization does not crash
+    if [ -n "${PID_RELAUNCH}" ]; then
+      echo "=== Testing START CALL button on Home screen ==="
+      adb shell uiautomator dump /sdcard/home_dump.xml >/dev/null 2>&1 || true
+      adb pull /sdcard/home_dump.xml home_dump.xml >/dev/null 2>&1 || true
+      python3 - <<'PYEOF'
+import re, subprocess, xml.etree.ElementTree as ET
+try:
+    root = ET.parse('home_dump.xml').getroot()
+    for node in root.iter('node'):
+        if node.attrib.get('text', '').strip().upper() == 'START CALL':
+            m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds', ''))
+            if m:
+                x1, y1, x2, y2 = map(int, m.groups())
+                print(f"Tapping START CALL at {(x1+x2)//2},{(y1+y2)//2}")
+                subprocess.run(['adb', 'shell', 'input', 'tap', str((x1+x2)//2), str((y1+y2)//2)])
+                break
+except Exception as e:
+    print("Home dump parse note:", e)
+PYEOF
+      sleep 5
+      dismiss_system_dialogs
+      sleep 5
+      PID_CALL=$(adb shell pidof "${PKG}" | tr -d '\r')
+      echo "PID_AFTER_START_CALL='${PID_CALL}'"
+      adb exec-out screencap -p > emulator-screen-call.png || true
+    fi
   fi
 fi
 
