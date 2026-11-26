@@ -63,6 +63,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     '@config-plugins/react-native-webrtc',
     './plugins/withCallKeepAndroid',
     './plugins/withAndroidOptimization',
+    './plugins/withImmersiveAndroid',
     ...(enableAndroidFcm ? ['@react-native-firebase/app'] : []),
   ],
   updates: {

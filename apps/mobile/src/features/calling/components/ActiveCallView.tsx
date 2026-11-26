@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useDynamicIsland } from '../../../components/DynamicIslandBar';
 import {
   AgentVisualizerState,
   CallChatMessage,
@@ -70,6 +70,21 @@ export function ActiveCallView({
   const [chatOpen, setChatOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const { setCallInfo } = useDynamicIsland();
+
+  useEffect(() => {
+    setCallInfo({
+      active: true,
+      label: status === 'connecting' ? 'Connecting' : formatDuration(elapsedSeconds),
+      speaking: agentState === 'speaking',
+    });
+  }, [agentState, elapsedSeconds, setCallInfo, status]);
+
+  useEffect(() => {
+    return () => {
+      setCallInfo({ active: false });
+    };
+  }, [setCallInfo]);
 
   const handleSend = async () => {
     const trimmed = draft.trim();
@@ -92,20 +107,8 @@ export function ActiveCallView({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        {/* Minimal Session Top Bar */}
-        <View style={styles.topBar}>
-          <View style={styles.brandGroup}>
-            <Image
-              source={require('../../../../assets/icon.png')}
-              style={styles.topLogo}
-              resizeMode="contain"
-            />
-            <Text style={styles.brandName}>Kallie</Text>
-          </View>
-          <Text style={styles.timer}>
-            {status === 'connecting' ? 'Connecting' : formatDuration(elapsedSeconds)}
-          </Text>
-        </View>
+        {/* Clean top clearance for the persistent Dynamic Island pill */}
+        <View style={styles.topClearance} />
 
         {/* Session Stage: Aura-first OR Compact Aura + Live Transcript */}
         {chatOpen ? (
@@ -240,33 +243,8 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 20,
   },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  brandGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  topLogo: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-  },
-  brandName: {
-    color: '#FAFAFA',
-    fontSize: 15,
-    fontWeight: '600',
-    letterSpacing: -0.2,
-  },
-  timer: {
-    color: '#71717A',
-    fontSize: 13,
-    fontWeight: '500',
-    fontVariant: ['tabular-nums'],
+  topClearance: {
+    height: 48,
   },
   auraStage: {
     flex: 1,

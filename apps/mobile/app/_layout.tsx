@@ -1,8 +1,20 @@
 import { Slot, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { Component, ReactNode, useCallback, useEffect } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  AppState,
+  Pressable,
+  StatusBar as RNStatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import {
+  DynamicIslandBar,
+  DynamicIslandProvider,
+} from '../src/components/DynamicIslandBar';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { IncomingCallModal } from '../src/features/calling/components/IncomingCallModal';
 import { useIncomingCall } from '../src/features/calling/hooks/useIncomingCall';
@@ -82,6 +94,19 @@ function RootLayoutContent() {
   const showBootOverlay = isBooting || !isNavReady || (!showOnboarding && needsAuthRedirect);
 
   useEffect(() => {
+    const enforceHiddenStatusBar = () => {
+      RNStatusBar.setHidden(true, 'fade');
+    };
+    enforceHiddenStatusBar();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        enforceHiddenStatusBar();
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
     if (isBooting || !isNavReady) return;
 
     if (!user && !inAuthGroup) {
@@ -110,7 +135,7 @@ function RootLayoutContent() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style="light" hidden animated />
       <Slot />
 
       {showOnboarding ? (
@@ -128,6 +153,8 @@ function RootLayoutContent() {
           />
         </View>
       ) : null}
+
+      {!showBootOverlay ? <DynamicIslandBar /> : null}
 
       {showBootOverlay ? (
         <View style={styles.loaderOverlay}>
@@ -153,9 +180,11 @@ function RootLayoutContent() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <AppErrorBoundary>
-        <RootLayoutContent />
-      </AppErrorBoundary>
+      <DynamicIslandProvider>
+        <AppErrorBoundary>
+          <RootLayoutContent />
+        </AppErrorBoundary>
+      </DynamicIslandProvider>
     </SafeAreaProvider>
   );
 }

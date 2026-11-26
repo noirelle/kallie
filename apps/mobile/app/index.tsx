@@ -1,8 +1,9 @@
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
+import { AgentAuraVisualizer } from '../src/features/calling/components/AgentAuraVisualizer';
 import { apiClient } from '../src/lib/apiClient';
 import { setPendingCallConnection } from '../src/lib/callSessionStore';
 import { supabase } from '../src/lib/supabaseClient';
@@ -79,27 +80,32 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <Image
-            source={require('../assets/icon.png')}
-            style={styles.headerLogo}
-            resizeMode="contain"
-          />
-          <Text style={styles.brand}>Kallie</Text>
-        </View>
-        <Pressable onPress={signOut} hitSlop={8}>
-          <Text style={styles.signOut}>Sign out</Text>
-        </Pressable>
-      </View>
+      {/* Top breathing space reserved for the floating Dynamic Island pill */}
+      <View style={styles.topClearance} />
 
       <View style={styles.center}>
-        <Image
-          source={require('../assets/icon.png')}
-          style={styles.heroLogo}
-          resizeMode="contain"
-        />
-        <Text style={styles.heading}>Talk with Kallie</Text>
+        <Pressable
+          onPress={handleStartCall}
+          disabled={starting}
+          style={({ pressed }) => [
+            styles.auraTouch,
+            pressed && !starting && styles.auraPressed,
+          ]}
+          accessibilityLabel="Start call with Kallie"
+        >
+          <AgentAuraVisualizer
+            state={starting ? 'connecting' : 'listening'}
+            audioLevel={starting ? 0.55 : 0.16}
+            size="lg"
+          />
+        </Pressable>
+
+        <Text style={styles.heading}>
+          {starting ? 'Connecting to Kallie...' : 'Talk with Kallie'}
+        </Text>
+        <Text style={styles.subtitle}>
+          Tap Aura to start a live voice session
+        </Text>
 
         <Pressable
           style={({ pressed }) => [
@@ -110,7 +116,9 @@ export default function HomeScreen() {
           onPress={handleStartCall}
           disabled={starting}
         >
-          <Text style={styles.startBtnText}>{starting ? 'Starting...' : 'Start call'}</Text>
+          <Text style={styles.startBtnText}>
+            {starting ? 'Connecting...' : 'Start call'}
+          </Text>
         </Pressable>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -137,9 +145,14 @@ export default function HomeScreen() {
         ) : null}
       </View>
 
-      <Text style={styles.footerHint}>
-        Ask by voice to schedule callbacks or reminders.
-      </Text>
+      <View style={styles.footer}>
+        <Text style={styles.footerHint}>
+          Ask by voice to schedule callbacks or reminders.
+        </Text>
+        <Pressable onPress={signOut} hitSlop={10}>
+          <Text style={styles.signOut}>Sign out</Text>
+        </Pressable>
+      </View>
     </SafeAreaView>
   );
 }
@@ -150,55 +163,43 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
     justifyContent: 'space-between',
     paddingHorizontal: 24,
-    paddingBottom: 20,
+    paddingBottom: 24,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-  },
-  brand: {
-    color: '#FAFAFA',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  signOut: {
-    color: '#A1A1AA',
-    fontSize: 14,
-    fontWeight: '500',
+  topClearance: {
+    height: 48,
   },
   center: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
   },
-  brandRow: {
-    flexDirection: 'row',
+  auraTouch: {
     alignItems: 'center',
-    gap: 8,
-  },
-  headerLogo: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-  },
-  heroLogo: {
-    width: 72,
-    height: 72,
-    borderRadius: 18,
+    justifyContent: 'center',
     marginBottom: 18,
   },
+  auraPressed: {
+    transform: [{ scale: 0.96 }],
+  },
   heading: {
-    color: '#FAFAFA',
-    fontSize: 22,
-    fontWeight: '600',
-    letterSpacing: -0.3,
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: -0.6,
+    textAlign: 'center',
+  },
+  subtitle: {
+    color: '#71717A',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
   },
   startBtn: {
-    marginTop: 24,
-    width: 220,
-    height: 52,
+    marginTop: 28,
+    width: '100%',
+    maxWidth: 260,
+    height: 54,
     backgroundColor: '#FFFFFF',
     borderRadius: 999,
     alignItems: 'center',
@@ -222,7 +223,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   upcomingBlock: {
-    marginTop: 32,
+    marginTop: 28,
     width: '100%',
     maxWidth: 320,
     gap: 8,
@@ -238,29 +239,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#0A0A0D',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     gap: 12,
   },
   reminderTitle: {
     color: '#FAFAFA',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '500',
     flex: 1,
   },
   reminderTime: {
-    color: '#A1A1AA',
-    fontSize: 11,
+    color: '#1FD5F9',
+    fontSize: 12,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
+  footer: {
+    alignItems: 'center',
+    gap: 12,
   },
   footerHint: {
-    color: '#71717A',
+    color: '#52525B',
     fontSize: 12,
     textAlign: 'center',
     lineHeight: 18,
     paddingHorizontal: 8,
+  },
+  signOut: {
+    color: '#71717A',
+    fontSize: 13,
+    fontWeight: '500',
   },
 });
