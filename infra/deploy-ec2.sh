@@ -62,8 +62,9 @@ if command -v node >/dev/null 2>&1; then
   node --test infra/test/preflight.test.mjs
 fi
 
-echo "==> [5/6] Building and starting containers..."
-docker compose up -d --build --remove-orphans
+echo "==> [5/6] Pulling prebuilt GHCR images and starting containers..."
+docker compose pull
+docker compose up -d --remove-orphans
 
 echo "==> [6/6] Running post-deploy smoke tests..."
 for i in $(seq 1 20); do

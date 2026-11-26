@@ -1,0 +1,89 @@
+name: Build Images & Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/**"
+      - "apps/web/**"
+      - "infra/**"
+      - "docker-compose.yml"
+      - ".github/workflows/docker-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build & Push GHCR Images
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            context: ./services/api
+            dockerfile: ./services/api/Dockerfile
+            image: ghcr.io/noirelle/kallie-api
+          - name: agent
+            context: ./services/agent
+            dockerfile: ./services/agent/Dockerfile
+            image: ghcr.io/noirelle/kallie-agent
+          - name: web
+            context: ./apps/web
+            dockerfile: ./apps/web/Dockerfile
+            image: ghcr.io/noirelle/kallie-web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+            NEXT_PUBLIC_API_URL=https://kallie.nozorin.com/api
+
+  deploy-ec2:
+    name: Deploy Prebuilt Images to EC2
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Deploy over SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          if [ -z "$EC2_HOST" ] || [ -z "$EC2_SSH_KEY" ]; then
+            echo "EC2 SSH secrets not configured; skipping remote deploy."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "${EC2_USER:-ubuntu}@${EC2_HOST}" \
+            "echo '$GHCR_TOKEN' | docker login ghcr.io -u '$GHCR_USER' --password-stdin && cd /opt/kallie && git pull --ff-only origin main && docker compose pull && docker compose up -d --remove-orphans && sleep 10 && bash infra/test/smoke-deploy.sh"

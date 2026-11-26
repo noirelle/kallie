@@ -1,5 +1,6 @@
 services:
   api:
+    image: ghcr.io/noirelle/kallie-api:latest
     build:
       context: ./services/api
       dockerfile: Dockerfile
@@ -20,6 +21,7 @@ services:
         max-file: "3"
 
   agent:
+    image: ghcr.io/noirelle/kallie-agent:latest
     build:
       context: ./services/agent
       dockerfile: Dockerfile
@@ -39,6 +41,7 @@ services:
         max-file: "3"
 
   web:
+    image: ghcr.io/noirelle/kallie-web:latest
     build:
       context: ./apps/web
       dockerfile: Dockerfile
