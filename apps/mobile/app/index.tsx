@@ -1,87 +1,114 @@
-import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
-import { AgentAuraVisualizer } from '../src/features/calling/components/AgentAuraVisualizer';
+import { ActiveCallView } from '../src/features/calling/components/ActiveCallView';
+import { useLiveKitCall } from '../src/features/calling/hooks/useLiveKitCall';
 import { apiClient } from '../src/lib/apiClient';
-import { setPendingCallConnection } from '../src/lib/callSessionStore';
+import { JoinCallResponse } from '../src/types/database';
 
 /**
- * Pure black (#000000), zero-clutter voice home screen.
- * The Aura ring itself serves as the sole visual centerpiece and interactive
- * trigger — tapping it shifts directly from idle to connecting into a call.
+ * Unified pure-black (#000000) Aura canvas.
+ * Tapping the Aura transitions seamlessly in-place from idle -> active call
+ * with zero route push, zero screen flash, and instant non-blocking hangup.
  */
 export default function HomeScreen() {
   const { user, loading } = useAuth();
-  const router = useRouter();
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [sessionActive, setSessionActive] = useState(false);
+  const [connection, setConnection] = useState<JoinCallResponse | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const attemptIdRef = useRef(0);
 
-  const handleStartCall = async () => {
-    if (starting) return;
-    setError(null);
-    setStarting(true);
+  const handleRemoteEnded = useCallback(() => {
+    attemptIdRef.current += 1;
+    setSessionActive(false);
+    setConnection(null);
+  }, []);
+
+  const {
+    status,
+    agentState,
+    error,
+    isMuted,
+    audioLevel,
+    elapsedSeconds,
+    messages,
+    toggleMute,
+    sendMessage,
+    endCall,
+  } = useLiveKitCall({
+    sessionId: connection?.session.id ?? '',
+    livekitUrl: connection?.livekitUrl ?? '',
+    token: connection?.token ?? '',
+    enabled: sessionActive,
+    onRemoteEnded: handleRemoteEnded,
+  });
+
+  const handleStartCall = useCallback(async () => {
+    if (sessionActive) return;
+    const attemptId = ++attemptIdRef.current;
+    setStartError(null);
+    // Enter active session immediately for 0ms perceived latency
+    setSessionActive(true);
+    setConnection(null);
+
     try {
       const joinData = await apiClient.createTestCall({
         title: 'Call with Kallie',
       });
-      setPendingCallConnection(joinData);
-      router.push(`/call/${joinData.session.id}`);
+      if (attemptIdRef.current !== attemptId) {
+        // User ended the call while API was still creating the session
+        void apiClient.endCall(joinData.session.id).catch(() => {});
+        return;
+      }
+      setConnection(joinData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to connect');
-    } finally {
-      setStarting(false);
+      if (attemptIdRef.current !== attemptId) return;
+      setSessionActive(false);
+      setConnection(null);
+      setStartError(err instanceof Error ? err.message : 'Unable to connect');
     }
-  };
+  }, [sessionActive]);
+
+  const handleEndCall = useCallback(() => {
+    attemptIdRef.current += 1;
+    setStartError(null);
+    setSessionActive(false);
+    setConnection(null);
+    void endCall();
+  }, [endCall]);
 
   if (loading || !user) {
-    return <View style={styles.container} />;
+    return <View style={styles.blank} />;
   }
 
   return (
-    <View style={styles.container}>
-      <Pressable
-        onPress={handleStartCall}
-        disabled={starting}
-        style={({ pressed }) => [
-          styles.auraTouch,
-          pressed && !starting && styles.auraPressed,
-        ]}
-        accessibilityLabel="Start voice session with Kallie"
-      >
-        <AgentAuraVisualizer
-          state={starting ? 'connecting' : 'idle'}
-          audioLevel={starting ? 0.52 : 0.1}
-          size="lg"
-        />
-      </Pressable>
-
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-    </View>
+    <ActiveCallView
+      isSessionActive={sessionActive}
+      status={status}
+      agentState={agentState}
+      audioLevel={audioLevel}
+      elapsedSeconds={elapsedSeconds}
+      isMuted={isMuted}
+      error={startError ?? error}
+      messages={messages}
+      controls={{
+        leave: true,
+        microphone: true,
+        screenShare: false,
+        camera: false,
+        chat: true,
+      }}
+      onStartCall={handleStartCall}
+      onSendMessage={sendMessage}
+      onToggleMute={toggleMute}
+      onEndCall={handleEndCall}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  blank: {
     flex: 1,
     backgroundColor: '#000000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  auraTouch: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  auraPressed: {
-    transform: [{ scale: 0.95 }],
-  },
-  errorText: {
-    position: 'absolute',
-    bottom: 40,
-    color: '#F87171',
-    fontSize: 13,
-    textAlign: 'center',
-    paddingHorizontal: 24,
   },
 });

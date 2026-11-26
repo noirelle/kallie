@@ -100,10 +100,16 @@ export function useLiveKitCall(params: {
   sessionId: string;
   livekitUrl: string;
   token: string;
+  enabled?: boolean;
   onRemoteEnded?: () => void;
 }) {
-  const [status, setStatus] = useState<CallConnectionState>('connecting');
-  const [agentState, setAgentState] = useState<AgentVisualizerState>('connecting');
+  const isEnabled = params.enabled !== false;
+  const [status, setStatus] = useState<CallConnectionState>(
+    isEnabled ? 'connecting' : 'disconnected',
+  );
+  const [agentState, setAgentState] = useState<AgentVisualizerState>(
+    isEnabled ? 'connecting' : 'idle',
+  );
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
@@ -149,15 +155,33 @@ export function useLiveKitCall(params: {
   }, [status]);
 
   useEffect(() => {
+    if (!isEnabled) {
+      setStatus('disconnected');
+      setAgentState('idle');
+      setError(null);
+      setIsMuted(false);
+      setIsCameraOn(false);
+      setIsScreenShareOn(false);
+      setAgentJoined(false);
+      setAudioLevel(0);
+      setElapsedSeconds(0);
+      setMessages([]);
+      return;
+    }
+
     if (!params.livekitUrl || !params.token) {
-      setStatus('error');
-      setError('Missing LiveKit connection credentials for this call.');
+      setStatus('connecting');
+      setAgentState('connecting');
+      setError(null);
       return;
     }
 
     let cancelled = false;
     wasConnectedRef.current = false;
     endedManuallyRef.current = false;
+    setStatus('connecting');
+    setAgentState('connecting');
+    setError(null);
 
     registerLiveKitGlobals();
     const nativeLk = getNativeLiveKit();
@@ -361,7 +385,7 @@ export function useLiveKitCall(params: {
         void nativeLk.AudioSession.stopAudioSession().catch(() => {});
       }
     };
-  }, [params.livekitUrl, params.sessionId, params.token, upsertMessage]);
+  }, [isEnabled, params.livekitUrl, params.sessionId, params.token, upsertMessage]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -435,12 +459,20 @@ export function useLiveKitCall(params: {
   const endCall = useCallback(async () => {
     endedManuallyRef.current = true;
     const room = roomRef.current;
-    if (room) {
-      await room.disconnect().catch(() => {});
-    }
-    clearPendingCallConnection(params.sessionId);
-    await apiClient.endCall(params.sessionId).catch(() => {});
+    roomRef.current = null;
+    const sessionId = params.sessionId;
+
+    // Update UI immediately without blocking on WebRTC/HTTP teardown
     setStatus('disconnected');
+    setAgentState('idle');
+
+    if (room) {
+      void room.disconnect().catch(() => {});
+    }
+    if (sessionId) {
+      clearPendingCallConnection(sessionId);
+      void apiClient.endCall(sessionId).catch(() => {});
+    }
   }, [params.sessionId]);
 
   return {

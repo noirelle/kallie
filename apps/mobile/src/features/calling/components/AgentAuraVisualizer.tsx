@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { memo, useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { AgentVisualizerState } from '../hooks/useLiveKitCall';
 
@@ -20,12 +20,12 @@ const BASE_SIZES = {
 } as const;
 
 /**
- * LiveKit Agents UI-inspired luminous Aura visualizer in pure React Native.
- * Animation speed, radial breathing, and glow intensity map directly to live
- * states (idle, connecting, listening, thinking, speaking) + audioLevel so the
- * Aura ring serves as the sole visual status indicator.
+ * 60fps GPU-optimized Aura visualizer.
+ * - Single ambient halo carries the soft blur glow (never rotated, zero blur re-raster lag).
+ * - Counter-rotating ribbons run continuously without resetting on state changes,
+ *   eliminating stutter/snaps when switching between idle, connecting, listening, and speaking.
  */
-export function AgentAuraVisualizer({
+export const AgentAuraVisualizer = memo(function AgentAuraVisualizer({
   state,
   audioLevel,
   size = 'lg',
@@ -35,44 +35,19 @@ export function AgentAuraVisualizer({
   const rotB = useRef(new Animated.Value(0)).current;
   const rotC = useRef(new Animated.Value(0)).current;
   const breathe = useRef(new Animated.Value(0)).current;
-  const energy = useRef(new Animated.Value(0)).current;
+  const energy = useRef(new Animated.Value(0.1)).current;
+  const activeOpacity = useRef(new Animated.Value(0.65)).current;
 
   const isMicro = size === 'xs';
   const isCompact = size === 'sm';
   const baseSize = BASE_SIZES[size];
 
-  // Continuous counter-rotating ribbon loops tuned cleanly per state
+  // Continuous unbroken native GPU rotation loops (never restarted on state change)
   useEffect(() => {
-    const speedMultiplier =
-      state === 'speaking'
-        ? 0.5
-        : state === 'thinking'
-          ? 0.4
-          : state === 'connecting'
-            ? 0.65
-            : state === 'listening'
-              ? 1.15
-              : 1.85; // idle: calm, serene drift
-
-    const breatheDuration =
-      state === 'speaking'
-        ? 560
-        : state === 'connecting'
-          ? 760
-          : state === 'thinking'
-            ? 840
-            : state === 'listening'
-              ? 1750
-              : 2600; // idle: slow deep breath
-
-    rotA.setValue(0);
-    rotB.setValue(0);
-    rotC.setValue(0);
-
     const loopA = Animated.loop(
       Animated.timing(rotA, {
         toValue: 1,
-        duration: Math.round(5400 * speedMultiplier),
+        duration: 5200,
         easing: Easing.linear,
         useNativeDriver: true,
       }),
@@ -81,7 +56,7 @@ export function AgentAuraVisualizer({
     const loopB = Animated.loop(
       Animated.timing(rotB, {
         toValue: 1,
-        duration: Math.round(7600 * speedMultiplier),
+        duration: 7400,
         easing: Easing.linear,
         useNativeDriver: true,
       }),
@@ -90,62 +65,94 @@ export function AgentAuraVisualizer({
     const loopC = Animated.loop(
       Animated.timing(rotC, {
         toValue: 1,
-        duration: Math.round(4100 * speedMultiplier),
+        duration: 3900,
         easing: Easing.linear,
         useNativeDriver: true,
       }),
     );
 
+    loopA.start();
+    loopB.start();
+    loopC.start();
+
+    return () => {
+      loopA.stop();
+      loopB.stop();
+      loopC.stop();
+    };
+  }, [rotA, rotB, rotC]);
+
+  // Smooth state-driven breathing rhythm
+  useEffect(() => {
+    const halfCycle =
+      state === 'speaking'
+        ? 520
+        : state === 'connecting'
+          ? 700
+          : state === 'thinking'
+            ? 820
+            : state === 'listening'
+              ? 1650
+              : 2400;
+
     const breatheLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(breathe, {
           toValue: 1,
-          duration: breatheDuration,
+          duration: halfCycle,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(breathe, {
           toValue: 0,
-          duration: breatheDuration,
+          duration: halfCycle,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ]),
     );
 
-    loopA.start();
-    loopB.start();
-    loopC.start();
     breatheLoop.start();
+    return () => breatheLoop.stop();
+  }, [breathe, state]);
 
-    return () => {
-      loopA.stop();
-      loopB.stop();
-      loopC.stop();
-      breatheLoop.stop();
-    };
-  }, [breathe, rotA, rotB, rotC, state]);
-
-  // Audio-level & state-driven radial energy response
+  // Smooth audio-level & state-driven radial energy + luminosity
   useEffect(() => {
-    const target =
+    const targetEnergy =
       state === 'speaking'
-        ? Math.max(0.5, Math.min(1, audioLevel || 0.78))
+        ? Math.max(0.55, Math.min(1, audioLevel || 0.78))
         : state === 'thinking'
-          ? 0.48
+          ? 0.5
           : state === 'connecting'
-            ? 0.36
+            ? 0.4
             : state === 'listening'
-              ? 0.22
-              : 0.08; // idle
+              ? 0.24
+              : 0.08;
 
-    Animated.timing(energy, {
-      toValue: target,
-      duration: state === 'speaking' ? 110 : 340,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
-  }, [audioLevel, energy, state]);
+    const targetOpacity =
+      state === 'speaking'
+        ? 1
+        : state === 'connecting' || state === 'thinking'
+          ? 0.92
+          : state === 'listening'
+            ? 0.84
+            : 0.68;
+
+    Animated.parallel([
+      Animated.timing(energy, {
+        toValue: targetEnergy,
+        duration: state === 'speaking' ? 140 : 380,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(activeOpacity, {
+        toValue: targetOpacity,
+        duration: 360,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [activeOpacity, audioLevel, energy, state]);
 
   const spinCW = rotA.interpolate({
     inputRange: [0, 1],
@@ -165,7 +172,7 @@ export function AgentAuraVisualizer({
   const haloScale = Animated.add(
     breathe.interpolate({
       inputRange: [0, 1],
-      outputRange: state === 'connecting' ? [0.88, 1.08] : [0.95, 1.07],
+      outputRange: [0.95, 1.07],
     }),
     energy.interpolate({
       inputRange: [0, 1],
@@ -176,7 +183,7 @@ export function AgentAuraVisualizer({
   const ribbonScale = Animated.add(
     breathe.interpolate({
       inputRange: [0, 1],
-      outputRange: state === 'connecting' ? [0.92, 1.06] : [0.98, 1.04],
+      outputRange: [0.97, 1.04],
     }),
     energy.interpolate({
       inputRange: [0, 1],
@@ -186,7 +193,7 @@ export function AgentAuraVisualizer({
 
   const haloOpacity = energy.interpolate({
     inputRange: [0, 1],
-    outputRange: state === 'idle' ? [0.22, 0.45] : [0.38, 0.88],
+    outputRange: [0.28, 0.85],
   });
 
   const outerCanvas = Math.round(baseSize * (isMicro ? 1.3 : 1.24));
@@ -194,14 +201,19 @@ export function AgentAuraVisualizer({
   const ringB = Math.round(baseSize * 0.91);
   const ringC = Math.round(baseSize * 0.86);
 
-  const glowBlur = isMicro ? 5 : isCompact ? 10 : 30;
-  const innerBlur = isMicro ? 3 : isCompact ? 6 : 18;
-  const strokeThick = isMicro ? 1.5 : isCompact ? 2.4 : 6;
-  const strokeThin = isMicro ? 0.8 : isCompact ? 1.2 : 2.6;
+  const glowBlur = isMicro ? 5 : isCompact ? 10 : 28;
+  const strokeThick = isMicro ? 1.5 : isCompact ? 2.4 : 5.5;
+  const strokeThin = isMicro ? 0.8 : isCompact ? 1.2 : 2.4;
 
   return (
-    <View style={[styles.root, { width: outerCanvas, height: outerCanvas }]}>
-      {/* Wide ambient azure/cyan halo bloom */}
+    <Animated.View
+      style={[
+        styles.root,
+        { width: outerCanvas, height: outerCanvas, opacity: activeOpacity },
+      ]}
+      renderToHardwareTextureAndroid
+    >
+      {/* Single static-orientation GPU glow halo (fast — never rotated) */}
       <Animated.View
         style={[
           styles.layer,
@@ -209,16 +221,16 @@ export function AgentAuraVisualizer({
             width: baseSize,
             height: baseSize,
             borderRadius: baseSize / 2,
-            borderWidth: isMicro ? 1 : isCompact ? 2 : 5,
-            borderColor: 'rgba(31, 213, 249, 0.28)',
-            boxShadow: `0 0 ${glowBlur}px ${isMicro ? 1 : isCompact ? 2 : 6}px rgba(31, 213, 249, 0.45), inset 0 0 ${innerBlur}px ${isMicro ? 0 : isCompact ? 1 : 4}px rgba(59, 130, 246, 0.35)`,
+            borderWidth: isMicro ? 1 : isCompact ? 2 : 4,
+            borderColor: 'rgba(31, 213, 249, 0.25)',
+            boxShadow: `0 0 ${glowBlur}px ${isMicro ? 1 : isCompact ? 2 : 5}px rgba(31, 213, 249, 0.55)`,
             opacity: haloOpacity,
             transform: [{ scale: haloScale }],
           },
         ]}
       />
 
-      {/* Deep cobalt/azure organic ribbon (counter-clockwise) */}
+      {/* Deep azure organic ribbon (pure GPU transform, zero per-frame blur cost) */}
       <Animated.View
         style={[
           styles.layer,
@@ -231,8 +243,7 @@ export function AgentAuraVisualizer({
             borderLeftWidth: strokeThin,
             borderRightWidth: strokeThin,
             borderColor: SECONDARY_AZURE,
-            boxShadow: `0 0 ${isMicro ? 4 : isCompact ? 8 : 22}px ${isMicro ? 0 : isCompact ? 1 : 3}px rgba(59, 130, 246, 0.65), inset 0 0 ${isMicro ? 2 : isCompact ? 5 : 14}px 0px rgba(59, 130, 246, 0.45)`,
-            opacity: state === 'idle' ? 0.5 : state === 'listening' ? 0.7 : 0.9,
+            opacity: 0.78,
             transform: [
               { rotate: spinCCW },
               { scaleX: 1.07 },
@@ -243,7 +254,7 @@ export function AgentAuraVisualizer({
         ]}
       />
 
-      {/* Primary electric-cyan undulating ribbon (clockwise) */}
+      {/* Primary electric-cyan ribbon */}
       <Animated.View
         style={[
           styles.layer,
@@ -256,8 +267,7 @@ export function AgentAuraVisualizer({
             borderLeftWidth: strokeThick * 1.15,
             borderRightWidth: strokeThin * 1.2,
             borderColor: color,
-            boxShadow: `0 0 ${isMicro ? 4 : isCompact ? 8 : 20}px ${isMicro ? 0 : isCompact ? 1 : 2}px rgba(31, 213, 249, 0.78), inset 0 0 ${isMicro ? 2 : isCompact ? 4 : 12}px 0px rgba(31, 213, 249, 0.5)`,
-            opacity: state === 'idle' ? 0.75 : 0.95,
+            opacity: 0.94,
             transform: [
               { rotate: spinCW },
               { scaleX: 0.94 },
@@ -268,7 +278,7 @@ export function AgentAuraVisualizer({
         ]}
       />
 
-      {/* Bright cyan core energy wave (fast clockwise) */}
+      {/* Luminous ice-cyan core wave */}
       <Animated.View
         style={[
           styles.layer,
@@ -281,15 +291,7 @@ export function AgentAuraVisualizer({
             borderBottomWidth: strokeThin * 0.9,
             borderLeftWidth: strokeThin * 0.9,
             borderColor: HIGHLIGHT_CYAN,
-            boxShadow: `0 0 ${isMicro ? 3 : isCompact ? 6 : 14}px 0px rgba(165, 243, 252, 0.75)`,
-            opacity:
-              state === 'speaking'
-                ? 0.98
-                : state === 'thinking' || state === 'connecting'
-                  ? 0.85
-                  : state === 'listening'
-                    ? 0.65
-                    : 0.42,
+            opacity: 0.72,
             transform: [
               { rotate: spinFastCW },
               { scaleX: 1.05 },
@@ -299,9 +301,9 @@ export function AgentAuraVisualizer({
           },
         ]}
       />
-    </View>
+    </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   root: {

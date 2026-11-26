@@ -43,6 +43,11 @@ function withImmersiveAndroid(config) {
     )
   }
 
+  override fun onResume() {
+    super.onResume()
+    applyImmersiveMode()
+  }
+
   override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
     if (hasFocus) {
