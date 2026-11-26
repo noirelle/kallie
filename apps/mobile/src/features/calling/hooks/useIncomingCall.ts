@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Vibration } from 'react-native';
 import { apiClient } from '../../../lib/apiClient';
-import { setPendingCallConnection } from '../../../lib/callSessionStore';
 import { supabase } from '../../../lib/supabaseClient';
 import { CallSession, JoinCallResponse } from '../../../types/database';
 import {
@@ -78,19 +77,31 @@ function createPlaceholderSession(
   };
 }
 
+export interface UseIncomingCallCallbacks {
+  activeSessionId?: string | null;
+  onAnswerSession: (
+    sessionId: string,
+    options: { openUi: boolean },
+  ) => Promise<JoinCallResponse | null>;
+  onOpenActiveCall: () => void;
+  onHangUpSession: (sessionId?: string) => void;
+}
+
 export function useIncomingCall(
   userId: string | undefined,
-  onDirectAccepted?: (sessionId: string) => void,
+  callbacks: UseIncomingCallCallbacks,
 ) {
   const [incomingSession, setIncomingSession] = useState<CallSession | null>(null);
   const [processing, setProcessing] = useState(false);
 
   const stopRingtoneRef = useRef<(() => void) | null>(null);
   const handledSessionsRef = useRef<Set<string>>(new Set());
-  const activeSessionIdRef = useRef<string | null>(null);
+  const incomingSessionIdRef = useRef<string | null>(null);
   const processingRef = useRef(false);
+  const callbacksRef = useRef(callbacks);
+  callbacksRef.current = callbacks;
 
-  activeSessionIdRef.current = incomingSession?.id ?? null;
+  incomingSessionIdRef.current = incomingSession?.id ?? null;
 
   const stopRingingFeedback = useCallback(() => {
     if (stopRingtoneRef.current) {
@@ -122,7 +133,10 @@ export function useIncomingCall(
   );
 
   const presentIncomingSession = useCallback((session: CallSession) => {
-    if (handledSessionsRef.current.has(session.id)) {
+    if (
+      handledSessionsRef.current.has(session.id) ||
+      callbacksRef.current.activeSessionId === session.id
+    ) {
       return;
     }
     if (session.status !== 'ringing') {
@@ -138,7 +152,11 @@ export function useIncomingCall(
 
   const presentForegroundPush = useCallback(
     (payload: ForegroundIncomingCallPayload) => {
-      if (!userId || handledSessionsRef.current.has(payload.sessionId)) {
+      if (
+        !userId ||
+        handledSessionsRef.current.has(payload.sessionId) ||
+        callbacksRef.current.activeSessionId === payload.sessionId
+      ) {
         return;
       }
       presentIncomingSession(createPlaceholderSession(userId, payload));
@@ -148,32 +166,58 @@ export function useIncomingCall(
 
   const handleNativeIntent = useCallback(
     async (event: IncomingCallIntentEvent) => {
-      if (!userId || !event.sessionId) return;
+      if (!event.action) return;
       const { action, sessionId, title } = event;
+
+      if (action === 'hangup') {
+        if (sessionId) {
+          markHandled(sessionId);
+        }
+        setIncomingSession(null);
+        stopRingingFeedback();
+        callbacksRef.current.onHangUpSession(sessionId || undefined);
+        return;
+      }
+
+      if (action === 'open_active') {
+        setIncomingSession(null);
+        callbacksRef.current.onOpenActiveCall();
+        return;
+      }
+
+      if (!userId || !sessionId) return;
 
       if (action === 'decline') {
         dismissSession(sessionId);
+        // Native receiver already calls /decline-push via goAsync(); also ensure
+        // authenticated fallback decline when triggered from an active JS session.
         void apiClient.declineCall(sessionId).catch(() => {});
         return;
       }
 
-      if (action === 'answer') {
-        if (handledSessionsRef.current.has(sessionId) || processingRef.current) {
+      if (action === 'answer' || action === 'answer_background') {
+        if (
+          callbacksRef.current.activeSessionId === sessionId ||
+          handledSessionsRef.current.has(sessionId) ||
+          processingRef.current
+        ) {
+          if (action === 'answer') {
+            callbacksRef.current.onOpenActiveCall();
+          }
           return;
         }
+
         markHandled(sessionId);
         nativeIncomingCall.dismissIncomingCall(sessionId);
         stopRingingFeedback();
         setIncomingSession(null);
+
         processingRef.current = true;
         setProcessing(true);
-
         try {
-          const joinData = await apiClient.acceptCall(sessionId);
-          setPendingCallConnection(joinData);
-          onDirectAccepted?.(joinData.session.id);
-        } catch {
-          // Call may already have expired or lost network
+          await callbacksRef.current.onAnswerSession(sessionId, {
+            openUi: action === 'answer',
+          });
         } finally {
           processingRef.current = false;
           setProcessing(false);
@@ -182,14 +226,20 @@ export function useIncomingCall(
       }
 
       // action === 'show' (full-screen lock-screen wake or notification body tap)
-      if (handledSessionsRef.current.has(sessionId)) {
+      if (
+        handledSessionsRef.current.has(sessionId) ||
+        callbacksRef.current.activeSessionId === sessionId
+      ) {
         nativeIncomingCall.dismissIncomingCall(sessionId);
+        if (callbacksRef.current.activeSessionId === sessionId) {
+          callbacksRef.current.onOpenActiveCall();
+        }
         return;
       }
 
       presentIncomingSession(createPlaceholderSession(userId, { sessionId, title }));
 
-      // Confirm session is still ringing in DB so stale intents auto-dismiss
+      // Verify live session status so stale intents auto-dismiss cleanly
       const { data } = await supabase
         .from('call_sessions')
         .select('*')
@@ -205,7 +255,7 @@ export function useIncomingCall(
         );
       }
     },
-    [dismissSession, markHandled, onDirectAccepted, presentIncomingSession, stopRingingFeedback, userId],
+    [dismissSession, markHandled, presentIncomingSession, stopRingingFeedback, userId],
   );
 
   // Foreground ringing feedback (web chime / subtle Android vibration) + 35s safety timeout
@@ -233,7 +283,7 @@ export function useIncomingCall(
     };
   }, [dismissSession, incomingSession, stopRingingFeedback]);
 
-  // Listen to native Android incoming call intents (cold-start pending + live warm launches)
+  // Listen to native Android incoming call & ongoing call intents (cold-start + warm launches)
   useEffect(() => {
     if (!userId || Platform.OS !== 'android') return;
 
@@ -290,7 +340,7 @@ export function useIncomingCall(
           const updated = payload.new as CallSession;
           if (updated.status !== 'ringing') {
             dismissSession(updated.id);
-          } else if (activeSessionIdRef.current === updated.id) {
+          } else if (incomingSessionIdRef.current === updated.id) {
             setIncomingSession(updated);
           }
         },
@@ -311,16 +361,13 @@ export function useIncomingCall(
     markHandled(sessionId);
     nativeIncomingCall.dismissIncomingCall(sessionId);
     stopRingingFeedback();
+    setIncomingSession(null);
 
     processingRef.current = true;
     setProcessing(true);
     try {
-      const joinData = await apiClient.acceptCall(sessionId);
-      setPendingCallConnection(joinData);
-      setIncomingSession(null);
-      return joinData;
+      return await callbacksRef.current.onAnswerSession(sessionId, { openUi: true });
     } catch {
-      setIncomingSession(null);
       return null;
     } finally {
       processingRef.current = false;

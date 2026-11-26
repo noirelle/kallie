@@ -119,7 +119,12 @@ export function registerBackgroundFcmHandler(): void {
     if (!data?.type) return;
 
     if (data.type === 'incoming_call' && data.sessionId) {
-      nativeIncomingCall.showIncomingCall(data.sessionId, data.title || 'Kallie');
+      nativeIncomingCall.showIncomingCall(
+        data.sessionId,
+        data.title || 'Kallie',
+        data.declineUrl,
+        data.declineToken,
+      );
       return;
     }
 

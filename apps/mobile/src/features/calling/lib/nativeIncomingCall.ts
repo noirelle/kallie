@@ -1,15 +1,23 @@
 import { DeviceEventEmitter, NativeModules, Platform } from 'react-native';
 
 export interface IncomingCallIntentEvent {
-  action: 'show' | 'answer' | 'decline';
+  action: 'show' | 'answer' | 'answer_background' | 'decline' | 'hangup' | 'open_active';
   sessionId: string;
   title: string;
 }
 
 interface NativeKallieIncomingCall {
   ensureChannels: () => void;
-  showIncomingCall: (sessionId: string, title: string) => void;
+  showIncomingCall: (
+    sessionId: string,
+    title: string,
+    declineUrl?: string | null,
+    declineToken?: string | null,
+  ) => void;
   dismissIncomingCall: (sessionId: string) => void;
+  startCallForegroundService: (sessionId: string, title: string) => void;
+  stopCallForegroundService: () => void;
+  getActiveCallSessionId: () => Promise<string | null>;
   showReminderNotification: (scheduleId: string, title: string, body: string) => void;
   consumePendingCallIntent: () => Promise<IncomingCallIntentEvent | null>;
   canUseFullScreenIntent: () => Promise<boolean>;
@@ -32,9 +40,19 @@ export const nativeIncomingCall = {
     }
   },
 
-  showIncomingCall(sessionId: string, title: string): void {
+  showIncomingCall(
+    sessionId: string,
+    title: string,
+    declineUrl?: string | null,
+    declineToken?: string | null,
+  ): void {
     try {
-      nativeMod?.showIncomingCall(sessionId, title);
+      nativeMod?.showIncomingCall(
+        sessionId,
+        title,
+        declineUrl ?? null,
+        declineToken ?? null,
+      );
     } catch {
       // Safe no-op
     }
@@ -45,6 +63,31 @@ export const nativeIncomingCall = {
       nativeMod?.dismissIncomingCall(sessionId);
     } catch {
       // Safe no-op
+    }
+  },
+
+  startCallForegroundService(sessionId: string, title: string): void {
+    try {
+      nativeMod?.startCallForegroundService(sessionId, title);
+    } catch {
+      // Safe no-op
+    }
+  },
+
+  stopCallForegroundService(): void {
+    try {
+      nativeMod?.stopCallForegroundService();
+    } catch {
+      // Safe no-op
+    }
+  },
+
+  async getActiveCallSessionId(): Promise<string | null> {
+    if (!nativeMod) return null;
+    try {
+      return await nativeMod.getActiveCallSessionId();
+    } catch {
+      return null;
     }
   },
 

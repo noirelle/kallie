@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
@@ -12,6 +13,7 @@ import {
   AgentDispatchClient,
   RoomServiceClient,
 } from 'livekit-server-sdk';
+import { verifyCallDeclineToken } from '../../common/security/callActionToken';
 import { SupabaseAdminService } from '../../common/supabase/supabaseAdmin.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateTestCallDto } from './dto/createTestCall.dto';
@@ -255,6 +257,28 @@ export class CallsService {
       .catch(() => {});
 
     return { ok: true, session: data };
+  }
+
+  async declineCallWithToken(sessionId: string, declineToken: string) {
+    const { data: session, error } = await this.supabaseAdmin.client
+      .from('call_sessions')
+      .select('id, user_id, status')
+      .eq('id', sessionId)
+      .maybeSingle<{ id: string; user_id: string; status: string }>();
+
+    if (error || !session) {
+      throw new NotFoundException('Call session not found');
+    }
+
+    const signingSecret =
+      this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY') ||
+      this.livekitApiSecret;
+
+    if (!verifyCallDeclineToken(signingSecret, session.id, session.user_id, declineToken)) {
+      throw new UnauthorizedException('Invalid or expired call decline token');
+    }
+
+    return this.declineCall(session.id, session.user_id);
   }
 
   async endCall(sessionId: string, userId: string) {

@@ -13,6 +13,10 @@ import {
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { IncomingCallModal } from '../src/features/calling/components/IncomingCallModal';
+import {
+  ActiveCallProvider,
+  useActiveCall,
+} from '../src/features/calling/context/ActiveCallContext';
 import { useIncomingCall } from '../src/features/calling/hooks/useIncomingCall';
 import { registerLiveKitGlobals } from '../src/features/calling/hooks/useLiveKitCall';
 import {
@@ -67,12 +71,33 @@ function RootLayoutContent() {
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
   const autoUpdate = useAutoUpdate();
+  const activeCall = useActiveCall();
+
+  const isNavReady = Boolean(rootNavigationState?.key);
+
+  const openAuraHome = useCallback(() => {
+    if (!isNavReady) return;
+    if (segments[0] !== undefined) {
+      router.replace('/');
+    }
+  }, [isNavReady, router, segments]);
+
+  const handleAnswerSession = useCallback(
+    async (sessionId: string, options: { openUi: boolean }) => {
+      if (options.openUi) {
+        openAuraHome();
+      }
+      return activeCall.joinSessionById(sessionId);
+    },
+    [activeCall, openAuraHome],
+  );
 
   const handleNativeAccepted = useCallback(
     (sessionId: string) => {
-      router.push(`/call/${sessionId}`);
+      openAuraHome();
+      void activeCall.joinSessionById(sessionId);
     },
-    [router],
+    [activeCall, openAuraHome],
   );
 
   const {
@@ -82,14 +107,18 @@ function RootLayoutContent() {
     dismissSession,
     acceptIncomingCall,
     declineIncomingCall,
-  } = useIncomingCall(user?.id, handleNativeAccepted);
+  } = useIncomingCall(user?.id, {
+    activeSessionId: activeCall.activeSessionId,
+    onAnswerSession: handleAnswerSession,
+    onOpenActiveCall: openAuraHome,
+    onHangUpSession: activeCall.endActiveCall,
+  });
 
   useNativeCallKeep(user?.id, handleNativeAccepted, onboarding.completed, {
     onForegroundIncomingCall: presentForegroundPush,
     onForegroundCallEnded: dismissSession,
   });
 
-  const isNavReady = Boolean(rootNavigationState?.key);
   const isBooting = loading || !onboarding.hydrated || (Boolean(user) && !auraGuide.hydrated);
   const inAuthGroup = segments[0] === '(auth)';
   const needsAuthRedirect =
@@ -124,10 +153,7 @@ function RootLayoutContent() {
   }, [inAuthGroup, isBooting, isNavReady, router, user]);
 
   const handleAccept = async () => {
-    const joinData = await acceptIncomingCall();
-    if (joinData) {
-      router.push(`/call/${joinData.session.id}`);
-    }
+    await acceptIncomingCall();
   };
 
   const handleCompleteOnboarding = useCallback(
@@ -194,7 +220,9 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <AppErrorBoundary>
-        <RootLayoutContent />
+        <ActiveCallProvider>
+          <RootLayoutContent />
+        </ActiveCallProvider>
       </AppErrorBoundary>
     </SafeAreaProvider>
   );

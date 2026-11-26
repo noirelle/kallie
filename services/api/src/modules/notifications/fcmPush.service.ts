@@ -7,6 +7,8 @@ export interface IncomingCallPushPayload {
   sessionId: string;
   roomName: string;
   title: string;
+  declineToken?: string;
+  declineUrl?: string;
 }
 
 export interface CallReminderPushPayload {
@@ -79,6 +81,8 @@ export class FcmPushService implements OnModuleInit {
           sessionId: payload.sessionId,
           roomName: payload.roomName,
           title: payload.title,
+          ...(payload.declineToken ? { declineToken: payload.declineToken } : {}),
+          ...(payload.declineUrl ? { declineUrl: payload.declineUrl } : {}),
         },
       });
       this.logger.log(`Sent Android FCM incoming call push for session ${payload.sessionId}`);

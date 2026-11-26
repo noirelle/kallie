@@ -1,118 +1,31 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { ActiveCallView } from '../../src/features/calling/components/ActiveCallView';
-import { useLiveKitCall } from '../../src/features/calling/hooks/useLiveKitCall';
-import { apiClient } from '../../src/lib/apiClient';
-import {
-  getPendingCallConnection,
-  setPendingCallConnection,
-} from '../../src/lib/callSessionStore';
-import { JoinCallResponse } from '../../src/types/database';
+import React, { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useActiveCall } from '../../src/features/calling/context/ActiveCallContext';
 
-function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
-  const router = useRouter();
-
-  const handleRemoteEnded = useCallback(() => {
-    router.replace('/');
-  }, [router]);
-
-  const {
-    status,
-    agentState,
-    agentReady,
-    connectionStatus,
-    error,
-    isMuted,
-    isCameraOn,
-    isScreenShareOn,
-    audioLevel,
-    elapsedSeconds,
-    messages,
-    toggleMute,
-    toggleCamera,
-    toggleScreenShare,
-    sendMessage,
-    endCall,
-  } = useLiveKitCall({
-    sessionId: connection.session.id,
-    livekitUrl: connection.livekitUrl,
-    token: connection.token,
-    onRemoteEnded: handleRemoteEnded,
-  });
-
-  const handleEndCall = async () => {
-    await endCall();
-    router.replace('/');
-  };
-
-  return (
-    <ActiveCallView
-      isSessionActive
-      isCallReady={agentReady}
-      status={status}
-      agentState={agentState}
-      connectionStatus={connectionStatus}
-      audioLevel={audioLevel}
-      elapsedSeconds={elapsedSeconds}
-      isMuted={isMuted}
-      isCameraOn={isCameraOn}
-      isScreenShareOn={isScreenShareOn}
-      error={error}
-      messages={messages}
-      controls={{
-        leave: true,
-        microphone: true,
-        screenShare: false,
-        camera: false,
-        chat: true,
-      }}
-      onSendMessage={sendMessage}
-      onToggleMute={toggleMute}
-      onToggleCamera={toggleCamera}
-      onToggleScreenShare={toggleScreenShare}
-      onEndCall={handleEndCall}
-    />
-  );
-}
-
+/**
+ * Deep-link / legacy call route passthrough.
+ * Immediately hands off to the singleton ActiveCallContext and replaces to '/'
+ * so all voice calls share one unified full-screen Aura canvas with zero duplicate rooms.
+ */
 export default function ActiveCallScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const router = useRouter();
-  const [connection, setConnection] = useState<JoinCallResponse | null>(() =>
-    sessionId ? getPendingCallConnection(sessionId) ?? null : null,
-  );
+  const { joinSessionById } = useActiveCall();
 
   useEffect(() => {
-    if (connection || !sessionId) return;
+    if (sessionId) {
+      void joinSessionById(sessionId);
+    }
+    router.replace('/');
+  }, [joinSessionById, router, sessionId]);
 
-    apiClient
-      .acceptCall(sessionId)
-      .then((data) => {
-        setPendingCallConnection(data);
-        setConnection(data);
-      })
-      .catch(() => {
-        router.replace('/');
-      });
-  }, [connection, router, sessionId]);
-
-  if (!connection) {
-    return (
-      <View style={styles.loader}>
-        <ActivityIndicator size="small" color="#FFFFFF" />
-      </View>
-    );
-  }
-
-  return <ActiveCallContent connection={connection} />;
+  return <View style={styles.blank} />;
 }
 
 const styles = StyleSheet.create({
-  loader: {
+  blank: {
     flex: 1,
     backgroundColor: '#000000',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
 });

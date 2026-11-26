@@ -1,83 +1,33 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { ActiveCallView } from '../src/features/calling/components/ActiveCallView';
-import { useLiveKitCall } from '../src/features/calling/hooks/useLiveKitCall';
-import { apiClient } from '../src/lib/apiClient';
-import { JoinCallResponse } from '../src/types/database';
+import { useActiveCall } from '../src/features/calling/context/ActiveCallContext';
 
 /**
- * Unified pure-black (#000000) Aura canvas.
- * Tapping the Aura transitions seamlessly in-place from idle -> active call
- * with zero route push, zero screen flash, and instant non-blocking hangup.
+ * Unified pure-black (#000000) Aura canvas backed by the singleton ActiveCallContext.
+ * Whether a call starts from tapping Aura, normal notification Answer, or returning
+ * to Kallie during an ongoing background call, this view restores the exact active
+ * LiveKit session with zero reconnection and zero duplicate connections.
  */
 export default function HomeScreen() {
   const { user, loading } = useAuth();
-  const [sessionActive, setSessionActive] = useState(false);
-  const [connection, setConnection] = useState<JoinCallResponse | null>(null);
-  const [startError, setStartError] = useState<string | null>(null);
-  const attemptIdRef = useRef(0);
-
-  const handleRemoteEnded = useCallback(() => {
-    attemptIdRef.current += 1;
-    setSessionActive(false);
-    setConnection(null);
-  }, []);
-
   const {
+    sessionActive,
     status,
     agentState,
     agentReady,
     connectionStatus,
-    error,
-    isMuted,
     audioLevel,
     elapsedSeconds,
+    isMuted,
+    error,
     messages,
-    toggleMute,
+    startImmediateCall,
     sendMessage,
-    endCall,
-  } = useLiveKitCall({
-    sessionId: connection?.session.id ?? '',
-    livekitUrl: connection?.livekitUrl ?? '',
-    token: connection?.token ?? '',
-    enabled: sessionActive,
-    onRemoteEnded: handleRemoteEnded,
-  });
-
-  const handleStartCall = useCallback(async () => {
-    if (sessionActive) return;
-    const attemptId = ++attemptIdRef.current;
-    setStartError(null);
-    // Enter active session immediately for 0ms perceived latency
-    setSessionActive(true);
-    setConnection(null);
-
-    try {
-      const joinData = await apiClient.createTestCall({
-        title: 'Call with Kallie',
-      });
-      if (attemptIdRef.current !== attemptId) {
-        // User ended the call while API was still creating the session
-        void apiClient.endCall(joinData.session.id).catch(() => {});
-        return;
-      }
-      setConnection(joinData);
-    } catch (err) {
-      if (attemptIdRef.current !== attemptId) return;
-      setSessionActive(false);
-      setConnection(null);
-      setStartError(err instanceof Error ? err.message : 'Unable to connect');
-    }
-  }, [sessionActive]);
-
-  const handleEndCall = useCallback(() => {
-    attemptIdRef.current += 1;
-    setStartError(null);
-    setSessionActive(false);
-    setConnection(null);
-    void endCall();
-  }, [endCall]);
+    toggleMute,
+    endActiveCall,
+  } = useActiveCall();
 
   if (loading || !user) {
     return <View style={styles.blank} />;
@@ -89,11 +39,11 @@ export default function HomeScreen() {
       isCallReady={agentReady}
       status={status}
       agentState={agentState}
-      connectionStatus={startError ? 'disconnected' : connectionStatus}
+      connectionStatus={connectionStatus}
       audioLevel={audioLevel}
       elapsedSeconds={elapsedSeconds}
       isMuted={isMuted}
-      error={startError ?? error}
+      error={error}
       messages={messages}
       controls={{
         leave: true,
@@ -102,10 +52,10 @@ export default function HomeScreen() {
         camera: false,
         chat: true,
       }}
-      onStartCall={handleStartCall}
+      onStartCall={startImmediateCall}
       onSendMessage={sendMessage}
       onToggleMute={toggleMute}
-      onEndCall={handleEndCall}
+      onEndCall={() => endActiveCall()}
     />
   );
 }
