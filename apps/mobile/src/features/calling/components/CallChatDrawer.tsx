@@ -49,7 +49,7 @@ export function CallChatDrawer({ messages, onSend }: CallChatDrawerProps) {
       keyboardVerticalOffset={16}
     >
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>LIVE CHAT & TRANSCRIPT</Text>
+        <Text style={styles.headerTitle}>Chat</Text>
         <Text style={styles.headerCount}>{messages.length}</Text>
       </View>
 
@@ -60,15 +60,13 @@ export function CallChatDrawer({ messages, onSend }: CallChatDrawerProps) {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>
-            Speak or type below — live transcript and chat messages appear here.
-          </Text>
+          <Text style={styles.emptyText}>Transcript and messages appear here</Text>
         }
         renderItem={({ item }) => {
           const isUser = item.sender === 'user';
           return (
             <View style={[styles.row, isUser ? styles.rowUser : styles.rowKallie]}>
-              <Text style={styles.senderLabel}>{isUser ? 'YOU' : 'KALLIE'}</Text>
+              <Text style={styles.senderLabel}>{isUser ? 'You' : 'Kallie'}</Text>
               <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleKallie]}>
                 <Text style={[styles.bubbleText, isUser ? styles.textUser : styles.textKallie]}>
                   {item.text}
@@ -84,8 +82,8 @@ export function CallChatDrawer({ messages, onSend }: CallChatDrawerProps) {
           style={styles.input}
           value={draft}
           onChangeText={setDraft}
-          placeholder="Message Kallie..."
-          placeholderTextColor="#52525B"
+          placeholder="Message Kallie"
+          placeholderTextColor="#71717A"
           returnKeyType="send"
           onSubmitEditing={handleSend}
           editable={!sending}
@@ -107,46 +105,45 @@ const styles = StyleSheet.create({
   wrapper: {
     flex: 1,
     width: '100%',
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: '#050505',
-    marginVertical: 12,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: '#0A0A0A',
+    marginVertical: 14,
     overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
   headerTitle: {
-    color: '#A1A1AA',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.5,
+    color: '#FAFAFA',
+    fontSize: 13,
+    fontWeight: '600',
   },
   headerCount: {
-    color: '#52525B',
-    fontSize: 10,
-    fontWeight: '700',
+    color: '#71717A',
+    fontSize: 12,
+    fontWeight: '500',
   },
   listContent: {
-    padding: 14,
+    padding: 16,
     gap: 12,
     flexGrow: 1,
   },
   emptyText: {
     color: '#52525B',
-    fontSize: 12,
+    fontSize: 13,
     textAlign: 'center',
-    marginTop: 24,
-    lineHeight: 18,
+    marginTop: 28,
   },
   row: {
-    maxWidth: '88%',
+    maxWidth: '86%',
     gap: 4,
   },
   rowUser: {
@@ -158,27 +155,27 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   senderLabel: {
-    color: '#52525B',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.2,
+    color: '#71717A',
+    fontSize: 11,
+    fontWeight: '500',
+    paddingHorizontal: 4,
   },
   bubble: {
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
   },
   bubbleUser: {
     backgroundColor: '#FFFFFF',
-    borderColor: '#FFFFFF',
   },
   bubbleKallie: {
-    backgroundColor: '#0E0E0E',
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: '#161616',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   bubbleText: {
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 14,
+    lineHeight: 20,
   },
   textUser: {
     color: '#000000',
@@ -191,24 +188,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-    backgroundColor: '#000000',
-    padding: 8,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: '#050505',
+    padding: 10,
     gap: 8,
   },
   input: {
     flex: 1,
-    color: '#FAFAFA',
-    fontSize: 13,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: '#0A0A0A',
+    color: '#FFFFFF',
+    fontSize: 14,
+    paddingHorizontal: 16,
+    height: 42,
+    borderRadius: 999,
+    backgroundColor: '#111111',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   sendBtn: {
-    width: 38,
-    height: 38,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',

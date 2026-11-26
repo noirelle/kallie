@@ -50,7 +50,7 @@ export function ActiveCallView({
           resizeMode="contain"
         />
         <Text style={styles.timer}>
-          {status === 'connecting' ? 'CONNECTING' : formatDuration(elapsedSeconds)}
+          {status === 'connecting' ? 'Connecting...' : formatDuration(elapsedSeconds)}
         </Text>
       </View>
 
@@ -96,7 +96,7 @@ export function ActiveCallView({
           accessibilityLabel="End call"
         >
           <HangupIcon color="#FFFFFF" />
-          <Text style={styles.endBtnText}>END</Text>
+          <Text style={styles.endBtnText}>End</Text>
         </Pressable>
       </View>
     </SafeAreaView>

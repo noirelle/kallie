@@ -11,7 +11,7 @@ interface PermissionsSetupScreenProps {
   onContinue: () => void;
 }
 
-interface PermissionToggleRowProps {
+interface PermissionRowProps {
   title: string;
   subtitle: string;
   enabled: boolean;
@@ -19,20 +19,10 @@ interface PermissionToggleRowProps {
   onPress: () => void;
 }
 
-function PermissionToggleRow({
-  title,
-  subtitle,
-  enabled,
-  busy,
-  onPress,
-}: PermissionToggleRowProps) {
+function PermissionRow({ title, subtitle, enabled, busy, onPress }: PermissionRowProps) {
   return (
     <Pressable
-      style={({ pressed }) => [
-        styles.row,
-        enabled && styles.rowEnabled,
-        pressed && styles.rowPressed,
-      ]}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       onPress={onPress}
       disabled={busy}
     >
@@ -60,27 +50,29 @@ export function PermissionsSetupScreen({
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.main}>
-        <Image
-          source={require('../../../../assets/icon.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+        <View style={styles.logoFrame}>
+          <Image
+            source={require('../../../../assets/icon.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </View>
 
-        <Text style={styles.heading}>Allow permissions</Text>
-        <Text style={styles.subtitle}>So Kallie can call and hear you.</Text>
+        <Text style={styles.heading}>Permissions</Text>
+        <Text style={styles.subtitle}>Enable alerts and voice to get started</Text>
 
-        <View style={styles.list}>
-          <PermissionToggleRow
+        <View style={styles.groupCard}>
+          <PermissionRow
             title="Notifications"
             subtitle="Incoming calls and reminders"
             enabled={permissions.notifications}
             busy={busyKey === 'notifications'}
             onPress={onToggleNotifications}
           />
-
-          <PermissionToggleRow
+          <View style={styles.separator} />
+          <PermissionRow
             title="Microphone"
-            subtitle="Live voice calls"
+            subtitle="Live voice conversations"
             enabled={permissions.microphone}
             busy={busyKey === 'microphone'}
             onPress={onToggleMicrophone}
@@ -111,8 +103,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
     justifyContent: 'space-between',
     paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 24,
+    paddingTop: 28,
+    paddingBottom: 20,
   },
   main: {
     flex: 1,
@@ -120,19 +112,30 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 380,
     alignSelf: 'center',
+    paddingBottom: 24,
   },
-  logo: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
+  logoFrame: {
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+    backgroundColor: '#0B0B0B',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
     alignSelf: 'center',
     marginBottom: 22,
   },
+  logo: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+  },
   heading: {
     color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '600',
-    letterSpacing: -0.4,
+    fontSize: 26,
+    fontWeight: '700',
+    letterSpacing: -0.5,
     textAlign: 'center',
   },
   subtitle: {
@@ -142,31 +145,32 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 28,
   },
-  list: {
-    gap: 12,
+  groupCard: {
+    backgroundColor: '#0D0D0D',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 24,
+    overflow: 'hidden',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 16,
-    backgroundColor: '#111111',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 24,
     paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  rowEnabled: {
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    backgroundColor: '#151515',
+    paddingVertical: 18,
   },
   rowPressed: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141414',
+  },
+  separator: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginHorizontal: 20,
   },
   rowText: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
   rowTitle: {
     color: '#FFFFFF',
@@ -178,10 +182,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   switchTrack: {
-    width: 48,
-    height: 28,
+    width: 50,
+    height: 30,
     borderRadius: 999,
-    backgroundColor: '#27272A',
+    backgroundColor: '#242428',
     padding: 3,
     justifyContent: 'center',
   },
@@ -189,10 +193,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   switchThumb: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#71717A',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#A1A1AA',
     alignSelf: 'flex-start',
   },
   switchThumbOn: {
@@ -207,12 +211,13 @@ const styles = StyleSheet.create({
   continueBtn: {
     backgroundColor: '#FFFFFF',
     borderRadius: 999,
-    height: 52,
+    height: 54,
     alignItems: 'center',
     justifyContent: 'center',
   },
   continueBtnPressed: {
     backgroundColor: '#E4E4E7',
+    transform: [{ scale: 0.99 }],
   },
   continueBtnText: {
     color: '#000000',
