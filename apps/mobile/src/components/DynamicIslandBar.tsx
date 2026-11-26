@@ -1,11 +1,22 @@
-import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import React, {
+  createContext,
+  ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AgentAuraVisualizer } from '../features/calling/components/AgentAuraVisualizer';
+import { AgentVisualizerState } from '../features/calling/hooks/useLiveKitCall';
 
-interface IslandCallInfo {
+export interface IslandCallInfo {
   active: boolean;
-  label?: string;
-  speaking?: boolean;
+  timer?: string;
+  agentState?: AgentVisualizerState;
+  audioLevel?: number;
 }
 
 interface DynamicIslandContextValue {
@@ -25,8 +36,9 @@ export function DynamicIslandProvider({ children }: { children: ReactNode }) {
     setCallInfoState((prev) => {
       if (
         prev.active === next.active &&
-        prev.label === next.label &&
-        prev.speaking === next.speaking
+        prev.timer === next.timer &&
+        prev.agentState === next.agentState &&
+        prev.audioLevel === next.audioLevel
       ) {
         return prev;
       }
@@ -55,15 +67,15 @@ function formatClock(date: Date): string {
 }
 
 /**
- * Minimalist Dynamic Island-inspired floating top pill displaying only the
- * current time — seamlessly adding a subtle live cyan Aura pulse and timer
- * during active voice sessions.
+ * Dynamic Island-style floating horizontal pill:
+ * - Active voice session: scaled-down live cyan/blue Aura visualizer on the left
+ *   and live session timer (e.g., 01:45) on the right.
+ * - Outside a call: minimalist pill showing only the live local time.
  */
 export function DynamicIslandBar() {
   const { callInfo } = useDynamicIsland();
   const insets = useSafeAreaInsets();
   const [timeText, setTimeText] = useState(() => formatClock(new Date()));
-  const pulse = useRef(new Animated.Value(0.6)).current;
   const topOffset = insets.top > 0 ? insets.top + 4 : 16;
 
   useEffect(() => {
@@ -73,45 +85,22 @@ export function DynamicIslandBar() {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!callInfo.active) {
-      pulse.setValue(0.6);
-      return;
-    }
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: callInfo.speaking ? 450 : 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 0.35,
-          duration: callInfo.speaking ? 450 : 1000,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [callInfo.active, callInfo.speaking, pulse]);
-
   return (
     <View style={[styles.wrapper, { top: topOffset }]} pointerEvents="none">
-      <View style={[styles.island, callInfo.active && styles.islandActive]}>
-        {callInfo.active ? (
-          <Animated.View style={[styles.liveDot, { opacity: pulse }]} />
-        ) : null}
-
-        <Text style={styles.timeText}>{timeText}</Text>
-
-        {callInfo.active && callInfo.label ? (
-          <>
-            <View style={styles.divider} />
-            <Text style={styles.callLabel}>{callInfo.label}</Text>
-          </>
-        ) : null}
-      </View>
+      {callInfo.active ? (
+        <View style={[styles.island, styles.islandSession]}>
+          <AgentAuraVisualizer
+            state={callInfo.agentState ?? 'connecting'}
+            audioLevel={callInfo.audioLevel ?? 0.16}
+            size="xs"
+          />
+          <Text style={styles.sessionTimer}>{callInfo.timer ?? '00:00'}</Text>
+        </View>
+      ) : (
+        <View style={styles.island}>
+          <Text style={styles.timeText}>{timeText}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -119,7 +108,6 @@ export function DynamicIslandBar() {
 const styles = StyleSheet.create({
   wrapper: {
     position: 'absolute',
-    top: 12,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -129,8 +117,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    height: 32,
+    height: 34,
     minWidth: 84,
     paddingHorizontal: 16,
     borderRadius: 999,
@@ -138,15 +125,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  islandActive: {
-    borderColor: 'rgba(31, 213, 249, 0.28)',
-    paddingHorizontal: 14,
-  },
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#1FD5F9',
+  islandSession: {
+    justifyContent: 'space-between',
+    minWidth: 124,
+    height: 38,
+    paddingLeft: 10,
+    paddingRight: 16,
+    gap: 14,
+    borderColor: 'rgba(31, 213, 249, 0.24)',
   },
   timeText: {
     color: '#F4F4F5',
@@ -155,15 +141,11 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     fontVariant: ['tabular-nums'],
   },
-  divider: {
-    width: 1,
-    height: 11,
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-  },
-  callLabel: {
-    color: '#1FD5F9',
-    fontSize: 12,
+  sessionTimer: {
+    color: '#FAFAFA',
+    fontSize: 13,
     fontWeight: '600',
+    letterSpacing: 0.2,
     fontVariant: ['tabular-nums'],
   },
 });

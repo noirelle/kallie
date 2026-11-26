@@ -12,6 +12,7 @@ export type CallConnectionState =
   | 'error';
 
 export type AgentVisualizerState =
+  | 'idle'
   | 'connecting'
   | 'listening'
   | 'thinking'

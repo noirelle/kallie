@@ -40,19 +40,6 @@ function formatDuration(totalSeconds: number): string {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-function getStatusPrompt(state: AgentVisualizerState, status: CallConnectionState): string {
-  if (status === 'connecting' || state === 'connecting') {
-    return 'Connecting to Kallie...';
-  }
-  if (state === 'speaking') {
-    return 'Kallie is speaking';
-  }
-  if (state === 'thinking') {
-    return 'Kallie is thinking...';
-  }
-  return 'Kallie is listening, ask a question';
-}
-
 export function ActiveCallView({
   status,
   agentState,
@@ -72,13 +59,17 @@ export function ActiveCallView({
   const [sending, setSending] = useState(false);
   const { setCallInfo } = useDynamicIsland();
 
+  const resolvedState: AgentVisualizerState =
+    status === 'connecting' ? 'connecting' : agentState;
+
   useEffect(() => {
     setCallInfo({
       active: true,
-      label: status === 'connecting' ? 'Connecting' : formatDuration(elapsedSeconds),
-      speaking: agentState === 'speaking',
+      timer: formatDuration(elapsedSeconds),
+      agentState: resolvedState,
+      audioLevel,
     });
-  }, [agentState, elapsedSeconds, setCallInfo, status]);
+  }, [audioLevel, elapsedSeconds, resolvedState, setCallInfo]);
 
   useEffect(() => {
     return () => {
@@ -107,45 +98,27 @@ export function ActiveCallView({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        {/* Clean top clearance for the persistent Dynamic Island pill */}
+        {/* Top clearance for the Dynamic Island pill (scaled-down Aura + timer) */}
         <View style={styles.topClearance} />
 
-        {/* Session Stage: Aura-first OR Compact Aura + Live Transcript */}
+        {/* Main Stage: Pure centered Aura OR borderless live transcript */}
         {chatOpen ? (
           <View style={styles.transcriptStage}>
-            <View style={styles.compactAuraHeader}>
-              <AgentAuraVisualizer
-                state={agentState}
-                audioLevel={audioLevel}
-                size="sm"
-              />
-              <Text style={styles.compactStatus}>
-                {getStatusPrompt(agentState, status)}
-              </Text>
-            </View>
-
-            <View style={styles.transcriptBody}>
-              <AgentChatTranscript messages={messages} agentState={agentState} />
-            </View>
+            <AgentChatTranscript messages={messages} agentState={resolvedState} />
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
           </View>
         ) : (
           <View style={styles.auraStage}>
-            <View style={styles.auraCenter}>
-              <AgentAuraVisualizer
-                state={agentState}
-                audioLevel={audioLevel}
-                size="lg"
-              />
-              {error ? <Text style={styles.errorText}>{error}</Text> : null}
-            </View>
-            <Text style={styles.statusHint}>
-              {getStatusPrompt(agentState, status)}
-            </Text>
+            <AgentAuraVisualizer
+              state={resolvedState}
+              audioLevel={audioLevel}
+              size="lg"
+            />
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
           </View>
         )}
 
-        {/* LiveKit Agents UI-style Expandable Control Bar */}
+        {/* Minimalist floating Control Bar */}
         <View style={styles.controlDock}>
           {chatOpen ? (
             <View style={styles.composerRow}>
@@ -244,54 +217,23 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   topClearance: {
-    height: 48,
+    height: 54,
   },
   auraStage: {
-    flex: 1,
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingBottom: 18,
-  },
-  auraCenter: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
-  },
-  statusHint: {
-    color: '#A1A1AA',
-    fontSize: 14,
-    fontWeight: '400',
-    textAlign: 'center',
-    letterSpacing: -0.1,
   },
   transcriptStage: {
     flex: 1,
     width: '100%',
     paddingBottom: 10,
   },
-  compactAuraHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  compactStatus: {
-    color: '#A1A1AA',
-    fontSize: 13,
-    fontWeight: '400',
-  },
-  transcriptBody: {
-    flex: 1,
-    width: '100%',
-  },
   errorText: {
     color: '#F87171',
     fontSize: 13,
-    marginTop: 14,
+    marginTop: 18,
     textAlign: 'center',
     paddingHorizontal: 16,
     lineHeight: 19,
