@@ -24,8 +24,10 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
     isSpeakerOn,
     audioLevel,
     elapsedSeconds,
+    messages,
     toggleMute,
     toggleSpeaker,
+    sendMessage,
     endCall,
   } = useLiveKitCall({
     sessionId: connection.session.id,
@@ -47,6 +49,8 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
       isMuted={isMuted}
       isSpeakerOn={isSpeakerOn}
       error={error}
+      messages={messages}
+      onSendMessage={sendMessage}
       onToggleMute={toggleMute}
       onToggleSpeaker={toggleSpeaker}
       onEndCall={handleEndCall}

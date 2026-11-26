@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CallConnectionState } from '../hooks/useLiveKitCall';
+import { CallChatMessage, CallConnectionState } from '../hooks/useLiveKitCall';
 import { AudioBarsVisualizer } from './AudioBarsVisualizer';
-import { HangupIcon, MicIcon, SpeakerIcon } from './CallIcons';
+import { CallChatDrawer } from './CallChatDrawer';
+import { ChatIcon, HangupIcon, MicIcon, SpeakerIcon } from './CallIcons';
 
 interface ActiveCallViewProps {
   status: CallConnectionState;
@@ -12,6 +13,8 @@ interface ActiveCallViewProps {
   isMuted: boolean;
   isSpeakerOn: boolean;
   error: string | null;
+  messages: CallChatMessage[];
+  onSendMessage: (text: string) => Promise<void>;
   onToggleMute: () => void;
   onToggleSpeaker: () => void;
   onEndCall: () => void;
@@ -30,10 +33,14 @@ export function ActiveCallView({
   isMuted,
   isSpeakerOn,
   error,
+  messages,
+  onSendMessage,
   onToggleMute,
   onToggleSpeaker,
   onEndCall,
 }: ActiveCallViewProps) {
+  const [chatOpen, setChatOpen] = useState(false);
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.topBar}>
@@ -48,7 +55,11 @@ export function ActiveCallView({
       </View>
 
       <View style={styles.center}>
-        <AudioBarsVisualizer status={status} audioLevel={audioLevel} />
+        {chatOpen ? (
+          <CallChatDrawer messages={messages} onSend={onSendMessage} />
+        ) : (
+          <AudioBarsVisualizer status={status} audioLevel={audioLevel} />
+        )}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </View>
 
@@ -72,12 +83,20 @@ export function ActiveCallView({
         ) : null}
 
         <Pressable
+          style={[styles.iconBtn, chatOpen && styles.iconBtnActive]}
+          onPress={() => setChatOpen((prev) => !prev)}
+          accessibilityLabel={chatOpen ? 'Hide live chat' : 'Show live chat'}
+        >
+          <ChatIcon color={chatOpen ? '#000000' : '#FAFAFA'} />
+        </Pressable>
+
+        <Pressable
           style={styles.endBtn}
           onPress={onEndCall}
           accessibilityLabel="End call"
         >
           <HangupIcon color="#FFFFFF" />
-          <Text style={styles.endBtnText}>END CALL</Text>
+          <Text style={styles.endBtnText}>END</Text>
         </Pressable>
       </View>
     </SafeAreaView>

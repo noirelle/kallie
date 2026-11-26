@@ -49,6 +49,26 @@ export function HangupIcon({ color }: IconProps) {
   );
 }
 
+export function ChatIcon({ color }: IconProps) {
+  return (
+    <View style={styles.box}>
+      <View style={[styles.chatBubble, { borderColor: color }]}>
+        <View style={[styles.chatLineLong, { backgroundColor: color }]} />
+        <View style={[styles.chatLineShort, { backgroundColor: color }]} />
+      </View>
+      <View style={[styles.chatTail, { borderTopColor: color }]} />
+    </View>
+  );
+}
+
+export function SendIcon({ color }: IconProps) {
+  return (
+    <View style={styles.box}>
+      <View style={[styles.sendArrow, { borderLeftColor: color }]} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   box: {
     width: 22,
@@ -163,5 +183,43 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 1,
     bottom: 1,
+  },
+  chatBubble: {
+    width: 17,
+    height: 13,
+    borderWidth: 1.7,
+    borderRadius: 2,
+    paddingHorizontal: 3,
+    justifyContent: 'center',
+    gap: 2.5,
+    marginBottom: 2,
+  },
+  chatLineLong: {
+    width: 9,
+    height: 1.5,
+  },
+  chatLineShort: {
+    width: 6,
+    height: 1.5,
+  },
+  chatTail: {
+    width: 0,
+    height: 0,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderRightColor: 'transparent',
+    position: 'absolute',
+    bottom: 1,
+    left: 4,
+  },
+  sendArrow: {
+    width: 0,
+    height: 0,
+    borderTopWidth: 6,
+    borderBottomWidth: 6,
+    borderLeftWidth: 10,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    marginLeft: 2,
   },
 });

@@ -11,6 +11,13 @@ export type CallConnectionState =
   | 'disconnected'
   | 'error';
 
+export interface CallChatMessage {
+  id: string;
+  sender: 'user' | 'kallie';
+  text: string;
+  timestamp: number;
+}
+
 type LiveKitNativeModule = {
   registerGlobals: () => void;
   AndroidAudioTypePresets?: {
@@ -85,6 +92,24 @@ export function useLiveKitCall(params: {
   const [agentJoined, setAgentJoined] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [messages, setMessages] = useState<CallChatMessage[]>([]);
+
+  const upsertMessage = useCallback(
+    (id: string, sender: 'user' | 'kallie', text: string, timestamp = Date.now()) => {
+      const cleaned = text.trim();
+      if (!cleaned) return;
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], text: cleaned };
+          return next;
+        }
+        return [...prev, { id, sender, text: cleaned, timestamp }];
+      });
+    },
+    [],
+  );
 
   const roomRef = useRef<Room | null>(null);
   const audioElementsRef = useRef<HTMLMediaElement[]>([]);
@@ -161,6 +186,55 @@ export function useLiveKitCall(params: {
       }
     });
 
+    room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
+      if (cancelled) return;
+      const isLocal = participant?.identity === room.localParticipant.identity;
+      for (const seg of segments) {
+        upsertMessage(
+          `seg-${seg.id}`,
+          isLocal ? 'user' : 'kallie',
+          seg.text,
+          seg.firstReceivedTime || Date.now(),
+        );
+      }
+    });
+
+    const handleTextStream = async (
+      reader: AsyncIterable<string> & {
+        info?: { id?: string; timestamp?: number; attributes?: Record<string, string> };
+      },
+      participantInfo: { identity: string },
+    ) => {
+      if (cancelled) return;
+      const isLocal = participantInfo.identity === room.localParticipant.identity;
+      const segId =
+        reader.info?.attributes?.['lk.segment_id'] ||
+        reader.info?.id ||
+        `${Date.now()}-${Math.random()}`;
+      const ts = reader.info?.timestamp || Date.now();
+      let accumulated = '';
+      try {
+        for await (const chunk of reader) {
+          if (cancelled) break;
+          accumulated += chunk;
+          upsertMessage(`stream-${segId}`, isLocal ? 'user' : 'kallie', accumulated, ts);
+        }
+      } catch {
+        // Ignore stream close errors on disconnect
+      }
+    };
+
+    try {
+      room.registerTextStreamHandler('lk.transcription', (reader, participantInfo) => {
+        void handleTextStream(reader, participantInfo);
+      });
+      room.registerTextStreamHandler('lk.chat', (reader, participantInfo) => {
+        void handleTextStream(reader, participantInfo);
+      });
+    } catch {
+      // Safe fallback if handler already registered
+    }
+
     room.on(RoomEvent.Disconnected, () => {
       if (cancelled) return;
       setStatus('disconnected');
@@ -229,6 +303,12 @@ export function useLiveKitCall(params: {
 
     return () => {
       cancelled = true;
+      try {
+        room.unregisterTextStreamHandler('lk.transcription');
+        room.unregisterTextStreamHandler('lk.chat');
+      } catch {
+        // Ignore unregister errors
+      }
       audioElementsRef.current.forEach((el) => el.remove());
       audioElementsRef.current = [];
       void room.disconnect().catch(() => {});
@@ -237,7 +317,24 @@ export function useLiveKitCall(params: {
         void nativeLk.AudioSession.stopAudioSession().catch(() => {});
       }
     };
-  }, [params.livekitUrl, params.sessionId, params.token]);
+  }, [params.livekitUrl, params.sessionId, params.token, upsertMessage]);
+
+  const sendMessage = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      const room = roomRef.current;
+      if (!trimmed || !room) return;
+
+      const msgId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      upsertMessage(msgId, 'user', trimmed);
+      try {
+        await room.localParticipant.sendText(trimmed, { topic: 'lk.chat' });
+      } catch {
+        // Ignore send errors when disconnected
+      }
+    },
+    [upsertMessage],
+  );
 
   const toggleMute = useCallback(async () => {
     const room = roomRef.current;
@@ -277,8 +374,10 @@ export function useLiveKitCall(params: {
     agentJoined,
     audioLevel,
     elapsedSeconds,
+    messages,
     toggleMute,
     toggleSpeaker,
+    sendMessage,
     endCall,
   };
 }
