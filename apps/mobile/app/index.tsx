@@ -9,7 +9,7 @@ import { supabase } from '../src/lib/supabaseClient';
 import { CallSchedule } from '../src/types/database';
 
 export default function HomeScreen() {
-  const { user, signOut } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const router = useRouter();
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +72,10 @@ export default function HomeScreen() {
       setStarting(false);
     }
   };
+
+  if (loading || !user) {
+    return <View style={styles.container} />;
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>

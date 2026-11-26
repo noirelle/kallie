@@ -75,17 +75,21 @@ function RootLayoutContent() {
 
   const isNavReady = Boolean(rootNavigationState?.key);
   const isBooting = loading || !onboarding.hydrated;
+  const inAuthGroup = segments[0] === '(auth)';
+  const needsAuthRedirect =
+    !isBooting && isNavReady && ((!user && !inAuthGroup) || (Boolean(user) && inAuthGroup));
+  const showOnboarding = onboarding.hydrated && !onboarding.completed;
+  const showBootOverlay = isBooting || !isNavReady || (!showOnboarding && needsAuthRedirect);
 
   useEffect(() => {
     if (isBooting || !isNavReady) return;
-    const inAuthGroup = segments[0] === '(auth)';
 
     if (!user && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (user && inAuthGroup) {
       router.replace('/');
     }
-  }, [isBooting, isNavReady, router, segments, user]);
+  }, [inAuthGroup, isBooting, isNavReady, router, user]);
 
   const handleAccept = async () => {
     const joinData = await acceptIncomingCall();
@@ -109,7 +113,7 @@ function RootLayoutContent() {
       <StatusBar style="light" />
       <Slot />
 
-      {onboarding.hydrated && !onboarding.completed ? (
+      {showOnboarding ? (
         <View style={styles.fullOverlay}>
           <OnboardingFlow
             discoverySource={onboarding.discoverySource}
@@ -125,7 +129,7 @@ function RootLayoutContent() {
         </View>
       ) : null}
 
-      {isBooting ? (
+      {showBootOverlay ? (
         <View style={styles.loaderOverlay}>
           <ActivityIndicator size="small" color="#FFFFFF" />
         </View>
