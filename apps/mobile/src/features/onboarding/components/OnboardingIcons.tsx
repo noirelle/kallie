@@ -18,17 +18,6 @@ export function BackArrowIcon({ color }: IconProps) {
   );
 }
 
-export function WaveformBadgeIcon({ color }: IconProps) {
-  const heights = [8, 16, 12, 20, 10];
-  return (
-    <View style={styles.waveRow}>
-      {heights.map((h, i) => (
-        <View key={i} style={[styles.waveBar, { height: h, backgroundColor: color }]} />
-      ))}
-    </View>
-  );
-}
-
 export type TopicIconKind =
   | 'wakeups'
   | 'reminders'
@@ -138,15 +127,6 @@ const styles = StyleSheet.create({
     borderRadius: 1,
     position: 'absolute',
     left: 6,
-  },
-  waveRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2.5,
-  },
-  waveBar: {
-    width: 2.5,
-    borderRadius: 2,
   },
   glyphBox: {
     width: 26,

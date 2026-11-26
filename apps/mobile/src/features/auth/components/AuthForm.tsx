@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KallieAvatarBadge } from '../../../components/KallieAvatarBadge';
 import { isSupabaseConfigured } from '../../../lib/env';
 import { supabase } from '../../../lib/supabaseClient';
 
@@ -73,7 +73,7 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -81,14 +81,17 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.main}>
-            <Image
-              source={require('../../../../assets/icon.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
+            <View style={styles.heroWrap}>
+              <KallieAvatarBadge size="md" />
+            </View>
 
             <Text style={styles.heading}>
-              {isLogin ? 'Sign in to Kallie' : 'Create account'}
+              {isLogin ? 'Welcome back' : 'Create account'}
+            </Text>
+            <Text style={styles.subtitle}>
+              {isLogin
+                ? 'Sign in to continue with Kallie'
+                : 'Start talking with Kallie in seconds'}
             </Text>
 
             <View style={styles.form}>
@@ -135,38 +138,41 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
 
               {error ? <Text style={styles.errorText}>{error}</Text> : null}
               {info ? <Text style={styles.infoText}>{info}</Text> : null}
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.primaryBtn,
-                  submitting && styles.btnDisabled,
-                  pressed && !submitting && styles.primaryBtnPressed,
-                ]}
-                onPress={handleSubmit}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#000000" size="small" />
-                ) : (
-                  <Text style={styles.primaryBtnText}>
-                    {isLogin ? 'Log in' : 'Sign up'}
-                  </Text>
-                )}
-              </Pressable>
             </View>
           </View>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.secondaryBtn,
-              pressed && styles.secondaryBtnPressed,
-            ]}
-            onPress={onSwitchMode}
-          >
-            <Text style={styles.secondaryBtnText}>
-              {isLogin ? 'Create new account' : 'Already have an account? Log in'}
-            </Text>
-          </Pressable>
+          <View style={styles.footer}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                submitting && styles.btnDisabled,
+                pressed && !submitting && styles.primaryBtnPressed,
+              ]}
+              onPress={handleSubmit}
+              disabled={submitting}
+            >
+              {submitting ? (
+                <ActivityIndicator color="#000000" size="small" />
+              ) : (
+                <Text style={styles.primaryBtnText}>
+                  {isLogin ? 'Log in' : 'Sign up'}
+                </Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={styles.switchRow}
+              onPress={onSwitchMode}
+              hitSlop={10}
+            >
+              <Text style={styles.switchMuted}>
+                {isLogin ? "Don't have an account? " : 'Already have an account? '}
+              </Text>
+              <Text style={styles.switchAccent}>
+                {isLogin ? 'Sign up' : 'Log in'}
+              </Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -185,41 +191,47 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'space-between',
     paddingHorizontal: 24,
-    paddingTop: 32,
+    paddingTop: 28,
     paddingBottom: 24,
   },
   main: {
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     width: '100%',
     maxWidth: 380,
     alignSelf: 'center',
   },
-  logo: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    alignSelf: 'center',
-    marginBottom: 22,
+  heroWrap: {
+    marginBottom: 26,
   },
   heading: {
     color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '600',
-    letterSpacing: -0.4,
+    fontSize: 31,
+    fontWeight: '700',
+    letterSpacing: -0.7,
+    lineHeight: 37,
     textAlign: 'center',
-    marginBottom: 28,
+  },
+  subtitle: {
+    color: '#71717A',
+    fontSize: 14,
+    marginTop: 10,
+    marginBottom: 30,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   form: {
+    width: '100%',
     gap: 12,
   },
   pillInput: {
     backgroundColor: '#111111',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 999,
     paddingHorizontal: 20,
-    height: 52,
+    height: 54,
     color: '#FFFFFF',
     fontSize: 15,
   },
@@ -228,11 +240,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#111111',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 999,
     paddingLeft: 20,
     paddingRight: 16,
-    height: 52,
+    height: 54,
   },
   passwordInput: {
     flex: 1,
@@ -241,7 +253,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   pillInputFocused: {
-    borderColor: 'rgba(255, 255, 255, 0.45)',
+    borderColor: 'rgba(255, 255, 255, 0.4)',
     backgroundColor: '#161616',
   },
   showBtn: {
@@ -257,22 +269,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     paddingHorizontal: 8,
-    marginTop: 2,
+    marginTop: 4,
   },
   infoText: {
     color: '#E4E4E7',
     fontSize: 13,
     textAlign: 'center',
     paddingHorizontal: 8,
-    marginTop: 2,
+    marginTop: 4,
+  },
+  footer: {
+    width: '100%',
+    maxWidth: 380,
+    alignSelf: 'center',
+    gap: 16,
+    paddingTop: 24,
   },
   primaryBtn: {
     backgroundColor: '#FFFFFF',
     borderRadius: 999,
-    height: 52,
+    height: 54,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 6,
   },
   primaryBtnPressed: {
     backgroundColor: '#E4E4E7',
@@ -285,24 +303,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
-  secondaryBtn: {
-    width: '100%',
-    maxWidth: 380,
-    alignSelf: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.16)',
-    borderRadius: 999,
-    height: 48,
+  switchRow: {
+    height: 22,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 24,
   },
-  secondaryBtnPressed: {
-    backgroundColor: '#111111',
+  switchMuted: {
+    color: '#71717A',
+    fontSize: 13,
   },
-  secondaryBtnText: {
-    color: '#E4E4E7',
-    fontSize: 14,
-    fontWeight: '500',
+  switchAccent: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
