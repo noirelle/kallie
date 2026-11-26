@@ -1,26 +1,46 @@
-<p align="left">
-  <img src="./docs/assets/kallie-icon.png" alt="Kallie Logo" width="72" />
-</p>
+<div align="center">
+  <img src="./docs/assets/kallie-icon.png" alt="Kallie" width="84" />
+  <h1>Kallie</h1>
+  <p><strong>Voice-first AI calling assistant powered by LiveKit, Gemini Live API, NestJS, Supabase, Next.js, and Expo.</strong></p>
+  <p>
+    <a href="https://kallie.nozorin.com"><img src="https://img.shields.io/badge/Web_App-kallie.nozorin.com-000000?style=for-the-badge" alt="Web App" /></a>
+    <a href="https://github.com/noirelle/kallie/releases/latest"><img src="https://img.shields.io/badge/Android_APK-Latest_Release-111111?style=for-the-badge" alt="Android APK" /></a>
+    <a href="https://github.com/noirelle/kallie/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/noirelle/kallie/ci.yml?branch=main&style=for-the-badge&label=CI&color=111111" alt="CI Status" /></a>
+  </p>
+</div>
 
-# Kallie
+---
 
-Kallie is a voice-first AI calling assistant built with LiveKit, Gemini Live API, NestJS, Supabase, Next.js, and Expo (React Native). Users converse directly with the AI over low-latency WebRTC audio and manage future callbacks and reminders purely by voice—such as asking to be called back in two minutes, reminded at a specific time, or have upcoming callbacks listed or cancelled—without traditional scheduling forms.
+## Overview
+
+Kallie replaces traditional call-scheduling forms with natural voice interaction over low-latency WebRTC audio. During any call, you can ask Kallie to call you back or remind you at a specific time—for example, *"Call me back in 2 minutes"*, *"Remind me tomorrow at 9 AM"*, or *"Cancel my water reminder"*—and Kallie automatically initiates the callback at the scheduled time.
 
 ---
 
 ## Download and Access
 
-| Platform | Access |
-| --- | --- |
-| **Web App** | [https://kallie.nozorin.com](https://kallie.nozorin.com) |
-| **Android App (APK)** | [Download Latest Release](https://github.com/noirelle/kallie/releases/latest) |
-| **All Releases** | [GitHub Releases](https://github.com/noirelle/kallie/releases) |
-
-### Scan to Download Android APK
-
-<img src="./docs/assets/android-download-qr.svg" alt="Scan to download Kallie Android APK from GitHub Releases" width="180" />
-
-Scan the QR code with your Android camera to open the latest release and install the `.apk`. Future UI and JavaScript updates are delivered automatically over the air via EAS Update; native binary updates prompt inside the app via GitHub Releases.
+<table>
+  <tr>
+    <td valign="middle" width="68%">
+      <h3>Get Kallie</h3>
+      <ul>
+        <li><strong>Web Client:</strong> <a href="https://kallie.nozorin.com">https://kallie.nozorin.com</a></li>
+        <li><strong>Android APK:</strong> <a href="https://github.com/noirelle/kallie/releases/latest">Download Latest Release</a></li>
+        <li><strong>Release History:</strong> <a href="https://github.com/noirelle/kallie/releases">GitHub Releases</a></li>
+      </ul>
+      <p>
+        Install the Android APK once. JavaScript and UI updates are delivered automatically over the air via EAS Update on push to <code>main</code>; native binary updates display an in-app download prompt linked to GitHub Releases.
+      </p>
+    </td>
+    <td align="center" valign="middle" width="32%">
+      <a href="https://github.com/noirelle/kallie/releases/latest">
+        <img src="./docs/assets/android-download-qr.svg" alt="Scan to download Kallie Android APK" width="144" />
+      </a>
+      <br />
+      <sub><strong>Scan for Android APK</strong><br /><code>releases/latest</code></sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -29,23 +49,27 @@ Scan the QR code with your Android camera to open the latest release and install
 ```text
 kallie/
 ├── apps/
-│   ├── web/            # Next.js client based on LiveKit agent-starter-react (dark theme)
+│   ├── web/            # Next.js client based on LiveKit agent-starter-react (pure-black dark theme)
 │   └── mobile/         # Expo React Native client (Android / iOS, native WebRTC, FCM + CallKeep, OTA updates)
 ├── services/
-│   ├── api/            # NestJS API, atomic due-call scheduler, LiveKit dispatch, FCM & APNs push services
+│   ├── api/            # NestJS API, 15s atomic due-call scheduler, LiveKit dispatch, FCM & APNs push
 │   └── agent/          # LiveKit Node.js AI voice agent (Gemini Live API + dynamic voice tools)
+├── infra/
+│   ├── caddy/          # Reverse proxy with automatic Let's Encrypt HTTPS (/ -> web, /api/* -> api)
+│   ├── test/           # Pre-deploy preflight checks and post-deploy smoke tests
+│   └── deploy-ec2.sh   # EC2 bootstrap, swap setup, GHCR pull, and verification script
 ├── supabase/
 │   └── migrations/     # PostgreSQL schema, Row Level Security (RLS), Realtime, atomic claim RPC
 └── .github/
-    └── workflows/      # Automated EAS OTA updates and Android APK release builds
+    └── workflows/      # CI tests, GHCR Docker build & EC2 auto-deploy, EAS OTA, Android APK releases
 ```
 
-### Core Flow
+### Core Call Flow
 
-1. **Voice Session:** The client authenticates with Supabase and requests a LiveKit room token from `services/api`. The API dispatches `kallie-voice-agent` and mints a participant JWT in parallel.
-2. **Dynamic Voice Scheduling:** During a call, `services/agent` exposes function tools (`schedule_callback`, `list_scheduled_calls`, `cancel_scheduled_call`, `end_call`) backed directly by Supabase PostgreSQL.
-3. **Automated Callbacks:** The NestJS scheduler polls due schedules every 15 seconds using PostgreSQL `FOR UPDATE SKIP LOCKED` (`claim_due_schedules`), creates a `ringing` session in `call_sessions`, notifies active clients via Supabase Realtime, and dispatches Android FCM / iOS APNs VoIP pushes when configured.
-4. **On-Accept Agent Dispatch:** The LiveKit AI agent is only dispatched after the user answers an incoming call, preventing unnecessary compute and API usage on missed or declined calls.
+1. **Authenticated Voice Session:** Clients sign in via Supabase Auth and request a LiveKit room token from `services/api`. The API dispatches `kallie-voice-agent` and mints a participant JWT in parallel.
+2. **Dynamic Voice Tools:** During a call, `services/agent` exposes four voice tools—`schedule_callback`, `list_scheduled_calls`, `cancel_scheduled_call`, and `end_call`—backed directly by Supabase PostgreSQL.
+3. **Automated Scheduled Callbacks:** The NestJS scheduler polls due schedules every 15 seconds using PostgreSQL `FOR UPDATE SKIP LOCKED` (`claim_due_schedules`), creates a `ringing` session in `call_sessions`, broadcasts to open clients via Supabase Realtime, and dispatches high-priority Android FCM / iOS APNs VoIP pushes when configured.
+4. **On-Accept Agent Dispatch:** The AI agent is dispatched only after the user answers an incoming callback, avoiding unnecessary compute and API usage on missed or declined calls.
 
 ---
 
@@ -58,51 +82,38 @@ kallie/
 | Backend API & Scheduler | NestJS, `@nestjs/schedule`, `livekit-server-sdk`, `firebase-admin`, Node.js HTTP/2 APNs |
 | Voice AI Agent | `@livekit/agents`, `@livekit/agents-plugin-google` (Gemini Live API) |
 | Database & Auth | Supabase (PostgreSQL, Auth, Row Level Security, Realtime) |
-| CI/CD | GitHub Actions, EAS Update, EAS Build |
+| Infrastructure & CI/CD | Docker, Caddy (Auto HTTPS), GitHub Container Registry (GHCR), GitHub Actions, AWS EC2, EAS |
 
 ---
 
-## Prerequisites
+## Local Development
+
+### Prerequisites
 
 - Node.js 22+ and npm
 - Supabase project (free tier supported)
 - LiveKit Cloud project (free tier supported)
 - Google AI Studio API key with Gemini Live access
-- Optional (Android lock-screen calling): Firebase project (`google-services.json` and Service Account JSON)
-- Optional (iOS lock-screen calling): Apple Developer Program account with APNs `.p8` key
 
----
+### 1. Apply Database Migration
 
-## Local Setup
+Execute `supabase/migrations/001_init_schema.sql` in the Supabase SQL Editor.
 
-### 1. Apply Database Schema
+### 2. Configure Environment Files
 
-Open your Supabase project SQL Editor and execute:
+Copy each `.env.example` to `.env` (or `.env.local` for `apps/web`) and populate your keys:
 
-```text
-supabase/migrations/001_init_schema.sql
-```
+- `services/api/.env`
+- `services/agent/.env`
+- `apps/web/.env.local`
+- `apps/mobile/.env`
 
-### 2. Configure Environment Variables
-
-Copy each `.env.example` to `.env` (or `.env.local` for `apps/web`) and populate your credentials:
-
-- `services/api/.env` — `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_AGENT_NAME`. Leave `FIREBASE_*` and `APNS_*` blank to run with Supabase Realtime only.
-- `services/agent/.env` — `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_AGENT_NAME`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_API_KEY`.
-- `apps/web/.env.local` — `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `AGENT_NAME`.
-- `apps/mobile/.env` — `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_GITHUB_REPO`.
-
-### 3. Install Dependencies
+### 3. Install and Run
 
 ```bash
 npm run install:all
-```
 
-### 4. Run Locally
-
-Start each service in a separate terminal from the repository root:
-
-```bash
+# Start in separate terminals
 npm run dev:api     # NestJS API & scheduler on http://localhost:3001
 npm run dev:agent   # LiveKit voice agent worker
 npm run dev:web     # Next.js web client on http://localhost:3000
@@ -110,54 +121,32 @@ npm run dev:web     # Next.js web client on http://localhost:3000
 
 ---
 
-## Android Lock-Screen Calling and APK Builds
-
-1. Create a Firebase project and register an Android app with package name `com.kallie.app`.
-2. Place the downloaded `google-services.json` at `apps/mobile/google-services.json`.
-3. Generate a Firebase Service Account private key and configure `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` in `services/api/.env`.
-4. Set `EXPO_ENABLE_ANDROID_FCM=true` and your publicly reachable API URL in `apps/mobile/.env`.
-5. Build an installable Android APK using EAS:
-
-```bash
-cd apps/mobile
-npx eas init
-npx eas build --profile preview --platform android
-```
-
----
-
-## Automated Updates via GitHub Actions
-
-- **Over-the-Air (OTA) JS/UI Updates:** Add `EXPO_TOKEN` to repository secrets (**Settings > Secrets and variables > Actions**). Every push to `main` modifying `apps/mobile/**` runs `.github/workflows/ota-update.yml` to publish an EAS Update. Installed mobile apps automatically check for, download, and prompt to apply updates on startup.
-- **Native Android APK Releases:** Pushing a semantic version tag (for example, `v0.2.0`) triggers `.github/workflows/android-release.yml`. Publishing the resulting `.apk` to GitHub Releases surfaces an in-app update banner linking directly to the release download.
-
----
-
 ## Verification and Testing
 
 ```bash
-npm run test:api        # NestJS build + unit tests (health, calls, scheduler)
-npm run test:agent      # Voice agent unit tests (metadata, voice tools, end_call)
-npm run test:all        # Run all automated test suites
-npm run build:web       # Production Next.js build check
-npm run typecheck:mobile
+npm run test:infra       # Pre-deploy Docker, Caddy, and secret-hygiene checks
+npm run test:api         # NestJS build and unit tests (health, calls, scheduler)
+npm run test:agent       # Voice agent unit tests (metadata, voice tools, end_call)
+npm run test:all         # Run all automated test suites
+npm run typecheck:mobile # Expo TypeScript verification
 ```
 
 ---
 
-## Docker and AWS EC2 Deployment
+## Deployment and Release Pipelines
 
-Production containers are defined in `docker-compose.yml` (`api`, `agent`, `web`, and `caddy` for automatic Let's Encrypt HTTPS).
+### Production Server (GitHub Actions -> GHCR -> AWS EC2)
 
-1. Point DNS `A` records for `API_DOMAIN` and `WEB_DOMAIN` to your EC2 public IP and open inbound ports `22`, `80`, and `443` in the EC2 Security Group.
-2. Copy `infra/.env.prod.example` to `.env` at the server repo root (`/opt/kallie/.env`) and upload `services/api/.env`, `services/agent/.env`, and `apps/web/.env.local`.
-3. Run the bootstrap and deployment script on the EC2 instance:
+Pushes to `main` touching `services/**`, `apps/web/**`, `infra/**`, or `docker-compose.yml` trigger `.github/workflows/docker-deploy.yml`:
 
-```bash
-bash infra/deploy-ec2.sh
-```
+1. Builds `api`, `agent`, and `web` images in parallel on GitHub runners and pushes them to `ghcr.io/noirelle/kallie-*`.
+2. Connects to EC2 over SSH, pulls the prebuilt images (`docker compose pull && docker compose up -d`), and verifies the live deployment with `infra/test/smoke-deploy.sh`.
+3. Caddy serves `https://kallie.nozorin.com` (Web) and `https://kallie.nozorin.com/api` (API) with automatic Let's Encrypt TLS.
 
-The script installs Docker and Compose if absent, pulls `main`, builds and starts all services with healthchecks, and verifies `GET /health`.
+### Mobile Updates and Releases
+
+- **Over-the-Air (OTA) Updates:** Pushes to `main` modifying `apps/mobile/**` run `.github/workflows/ota-update.yml` to publish updates to the `preview` and `production` EAS channels.
+- **Android APK GitHub Releases:** Pushing a version tag (for example, `git tag v0.2.0 && git push origin v0.2.0`) runs `.github/workflows/android-release.yml` to build the signed `.apk` on EAS and publish it directly to GitHub Releases.
 
 ---
 
