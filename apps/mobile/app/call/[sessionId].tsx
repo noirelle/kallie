@@ -17,7 +17,17 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
     router.replace('/');
   }, [router]);
 
-  const { status, error, isMuted, audioLevel, toggleMute, endCall } = useLiveKitCall({
+  const {
+    status,
+    error,
+    isMuted,
+    isSpeakerOn,
+    audioLevel,
+    elapsedSeconds,
+    toggleMute,
+    toggleSpeaker,
+    endCall,
+  } = useLiveKitCall({
     sessionId: connection.session.id,
     livekitUrl: connection.livekitUrl,
     token: connection.token,
@@ -33,9 +43,12 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
     <ActiveCallView
       status={status}
       audioLevel={audioLevel}
+      elapsedSeconds={elapsedSeconds}
       isMuted={isMuted}
+      isSpeakerOn={isSpeakerOn}
       error={error}
       onToggleMute={toggleMute}
+      onToggleSpeaker={toggleSpeaker}
       onEndCall={handleEndCall}
     />
   );
@@ -65,7 +78,7 @@ export default function ActiveCallScreen() {
   if (!connection) {
     return (
       <View style={styles.loader}>
-        <ActivityIndicator size="small" color="#1FD5F9" />
+        <ActivityIndicator size="small" color="#FFFFFF" />
       </View>
     );
   }

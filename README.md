@@ -1,3 +1,7 @@
+<p align="left">
+  <img src="./docs/assets/kallie-icon.png" alt="Kallie Logo" width="72" />
+</p>
+
 # Kallie
 
 Kallie is a voice-first AI calling assistant built with LiveKit, Gemini Live API, NestJS, Supabase, Next.js, and Expo (React Native). Users converse directly with the AI over low-latency WebRTC audio and manage future callbacks and reminders purely by voice—such as asking to be called back in two minutes, reminded at a specific time, or have upcoming callbacks listed or cancelled—without traditional scheduling forms.

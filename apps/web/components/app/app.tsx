@@ -117,7 +117,7 @@ export function App({ agentName }: AppProps) {
       <header className="fixed top-0 left-0 z-40 flex w-full items-center justify-between p-6">
         <div className="flex items-center gap-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/lk-logo-dark.svg" alt="Kallie" className="size-5" />
+          <img src="/kallie-logo.svg" alt="Kallie" className="size-6 rounded" />
           <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
             Kallie
           </span>

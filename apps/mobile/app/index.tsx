@@ -1,22 +1,12 @@
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { apiClient } from '../src/lib/apiClient';
 import { setPendingCallConnection } from '../src/lib/callSessionStore';
 import { supabase } from '../src/lib/supabaseClient';
 import { CallSchedule } from '../src/types/database';
-
-function WaveformMark() {
-  return (
-    <View style={styles.waveRow}>
-      {[20, 46, 34, 20, 28].map((h, i) => (
-        <View key={i} style={[styles.waveBar, { height: h }]} />
-      ))}
-    </View>
-  );
-}
 
 export default function HomeScreen() {
   const { user, signOut } = useAuth();
@@ -86,14 +76,25 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.brand}>KALLIE</Text>
+        <View style={styles.brandRow}>
+          <Image
+            source={require('../assets/icon.png')}
+            style={styles.headerLogo}
+            resizeMode="contain"
+          />
+          <Text style={styles.brand}>KALLIE</Text>
+        </View>
         <Pressable onPress={signOut}>
           <Text style={styles.signOut}>SIGN OUT</Text>
         </Pressable>
       </View>
 
       <View style={styles.center}>
-        <WaveformMark />
+        <Image
+          source={require('../assets/icon.png')}
+          style={styles.heroLogo}
+          resizeMode="contain"
+        />
         <Text style={styles.heading}>Talk live with Kallie</Text>
 
         <Pressable
@@ -167,16 +168,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: '100%',
   },
-  waveRow: {
+  brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 18,
+    gap: 8,
   },
-  waveBar: {
-    width: 6,
-    borderRadius: 999,
-    backgroundColor: '#FAFAFA',
+  headerLogo: {
+    width: 24,
+    height: 24,
+    borderRadius: 5,
+  },
+  heroLogo: {
+    width: 84,
+    height: 84,
+    borderRadius: 20,
+    marginBottom: 16,
   },
   heading: {
     color: '#FAFAFA',

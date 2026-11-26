@@ -53,6 +53,12 @@ export function AuthGate() {
         className="border-border bg-card w-full max-w-sm space-y-4 rounded-2xl border p-7 shadow-xl"
       >
         <div className="space-y-1 text-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/kallie-logo.svg"
+            alt="Kallie"
+            className="mx-auto mb-3 size-12 rounded-xl border border-white/10"
+          />
           <h1 className="text-foreground text-xl font-semibold tracking-tight">Kallie</h1>
           <p className="text-muted-foreground text-xs">
             {mode === 'login'

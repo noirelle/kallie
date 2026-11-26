@@ -5,6 +5,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { IncomingCallModal } from '../src/features/calling/components/IncomingCallModal';
 import { useIncomingCall } from '../src/features/calling/hooks/useIncomingCall';
+import { registerLiveKitGlobals } from '../src/features/calling/hooks/useLiveKitCall';
 import {
   registerBackgroundFcmHandler,
   useNativeCallKeep,
@@ -12,7 +13,8 @@ import {
 import { AppUpdateBanner } from '../src/features/updates/components/AppUpdateBanner';
 import { useAutoUpdate } from '../src/features/updates/hooks/useAutoUpdate';
 
-// Register Android killed/background FCM handler once at module load
+// Register native WebRTC globals & Android killed/background FCM handler once at module load
+registerLiveKitGlobals();
 registerBackgroundFcmHandler();
 
 export default function RootLayout() {

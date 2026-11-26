@@ -12,8 +12,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'kallie',
   owner: 'noirelle',
   scheme: 'kallie',
-  version: '0.1.0',
+  version: '0.1.1',
   orientation: 'portrait',
+  icon: './assets/icon.png',
   userInterfaceStyle: 'dark',
   backgroundColor: '#000000',
   ios: {
@@ -30,6 +31,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     package: 'com.kallie.app',
     backgroundColor: '#000000',
+    adaptiveIcon: {
+      foregroundImage: './assets/android-icon-foreground.png',
+      backgroundImage: './assets/android-icon-background.png',
+      monochromeImage: './assets/android-icon-monochrome.png',
+      backgroundColor: '#000000',
+    },
     permissions: [
       'RECORD_AUDIO',
       'MODIFY_AUDIO_SETTINGS',

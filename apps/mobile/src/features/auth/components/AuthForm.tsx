@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -63,6 +64,11 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
   return (
     <View style={styles.container}>
       <View style={styles.card}>
+        <Image
+          source={require('../../../../assets/icon.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
         <Text style={styles.brand}>Kallie</Text>
         <Text style={styles.subtitle}>
           {mode === 'login'
@@ -136,6 +142,13 @@ const styles = StyleSheet.create({
     padding: 28,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  logo: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    alignSelf: 'center',
+    marginBottom: 12,
   },
   brand: {
     fontSize: 22,
