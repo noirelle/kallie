@@ -55,8 +55,8 @@ interface ActiveCallViewProps {
 const DEFAULT_CONTROLS: Required<AgentControlBarControls> = {
   leave: true,
   microphone: true,
-  screenShare: true,
-  camera: true,
+  screenShare: false,
+  camera: false,
   chat: true,
 };
 

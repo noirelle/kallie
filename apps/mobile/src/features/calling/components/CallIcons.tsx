@@ -41,10 +41,11 @@ export function SpeakerIcon({ color, active = true }: IconProps & { active?: boo
 
 export function HangupIcon({ color }: IconProps) {
   return (
-    <View style={styles.hangupBox}>
-      <View style={[styles.hangupBar, { backgroundColor: color }]} />
-      <View style={[styles.hangupLeftEar, { backgroundColor: color }]} />
-      <View style={[styles.hangupRightEar, { backgroundColor: color }]} />
+    <View style={styles.box}>
+      <View style={[styles.phoneArc, { borderColor: color }]} />
+      <View style={[styles.phoneEarLeft, { backgroundColor: color }]} />
+      <View style={[styles.phoneEarRight, { backgroundColor: color }]} />
+      <View style={[styles.phoneSlash, { backgroundColor: color }]} />
     </View>
   );
 }
@@ -177,34 +178,39 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 1,
   },
-  hangupBox: {
-    width: 20,
-    height: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  hangupBar: {
-    width: 18,
-    height: 4,
-    borderRadius: 2,
+  phoneArc: {
+    width: 17,
+    height: 10,
+    borderTopLeftRadius: 9,
+    borderTopRightRadius: 9,
+    borderTopWidth: 2,
+    borderLeftWidth: 2,
+    borderRightWidth: 2,
     position: 'absolute',
-    top: 2,
+    top: 7,
   },
-  hangupLeftEar: {
-    width: 5,
-    height: 5,
+  phoneEarLeft: {
+    width: 4.5,
+    height: 4.5,
     borderRadius: 1.5,
     position: 'absolute',
-    left: 1,
-    bottom: 1,
+    left: 1.5,
+    top: 12.5,
   },
-  hangupRightEar: {
-    width: 5,
-    height: 5,
+  phoneEarRight: {
+    width: 4.5,
+    height: 4.5,
     borderRadius: 1.5,
     position: 'absolute',
-    right: 1,
-    bottom: 1,
+    right: 1.5,
+    top: 12.5,
+  },
+  phoneSlash: {
+    width: 21,
+    height: 1.8,
+    borderRadius: 1,
+    position: 'absolute',
+    transform: [{ rotate: '-45deg' }],
   },
   chatBubble: {
     width: 17,

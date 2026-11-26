@@ -58,8 +58,8 @@ function ActiveCallContent({ connection }: { connection: JoinCallResponse }) {
       controls={{
         leave: true,
         microphone: true,
-        screenShare: true,
-        camera: true,
+        screenShare: false,
+        camera: false,
         chat: true,
       }}
       onSendMessage={sendMessage}
