@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { TokenSource } from 'livekit-client';
 import { useSession } from '@livekit/components-react';
 import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
@@ -115,13 +116,13 @@ export function App({ agentName }: AppProps) {
       <AppSetup />
 
       <header className="fixed top-0 left-0 z-40 flex w-full items-center justify-between p-6">
-        <div className="flex items-center gap-2.5">
+        <Link href="/" className="flex items-center gap-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/kallie-logo.svg" alt="Kallie" className="size-6 rounded" />
+          <img src="/kallie-logo.svg" alt="Kallie" className="size-6 rounded border border-white/15" />
           <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
             Kallie
           </span>
-        </div>
+        </Link>
 
         <button
           type="button"
