@@ -33,6 +33,7 @@
     "android": "node scripts/androidDev.mjs build",
     "android:doctor": "node scripts/androidDev.mjs doctor",
     "android:build": "node scripts/androidDev.mjs build",
+    "android:install-debug": "node scripts/androidDev.mjs install-debug",
     "android:dev": "node scripts/androidDev.mjs dev",
     "android:logs": "node scripts/androidDev.mjs logs",
     "android:mirror": "node scripts/androidDev.mjs mirror",

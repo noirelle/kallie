@@ -11,6 +11,7 @@
     "dev:mobile": "npm --prefix apps/mobile run start",
     "mobile:doctor": "npm --prefix apps/mobile run android:doctor",
     "mobile:build": "npm --prefix apps/mobile run android:build",
+    "mobile:install-debug": "npm --prefix apps/mobile run android:install-debug",
     "mobile:dev": "npm --prefix apps/mobile run android:dev",
     "mobile:logs": "npm --prefix apps/mobile run android:logs",
     "mobile:mirror": "npm --prefix apps/mobile run android:mirror",

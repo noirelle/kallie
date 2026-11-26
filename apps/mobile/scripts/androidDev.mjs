@@ -201,6 +201,36 @@ async function cmdDev() {
   process.exit(code);
 }
 
+async function cmdInstallDebug() {
+  const env = buildEnv();
+  const tmpDir = path.join(os.tmpdir(), 'kallie-debug-apk');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  console.log('1/3 Downloading latest kallie-debug-apk artifact from GitHub Actions...');
+  let code = await runCommand(
+    'gh',
+    ['run', 'download', '--name', 'kallie-debug-apk', '--dir', tmpDir],
+    { cwd: path.resolve(MOBILE_DIR, '..', '..'), env },
+  );
+  if (code !== 0) {
+    console.error('Could not download kallie-debug-apk. Trigger the workflow first: gh workflow run android-dev-apk.yml');
+    process.exit(code);
+  }
+
+  const apkPath = path.join(tmpDir, 'kallie-debug.apk');
+  console.log('\n2/3 Installing Debug APK onto connected Android phone...');
+  // Uninstall existing release-signed app if signatures differ
+  probe('adb', ['uninstall', 'com.kallie.app'], env);
+  code = await runCommand('adb', ['install', '-r', apkPath], { env });
+  if (code !== 0) process.exit(code);
+
+  console.log('\n3/3 Forwarding Metro port (tcp:8081)...');
+  probe('adb', ['reverse', 'tcp:8081', 'tcp:8081'], env);
+  console.log('Done! Run "npm run mobile:dev" for instant hot reload.');
+  process.exit(0);
+}
+
 async function cmdLogs() {
   const env = buildEnv();
   probe('adb', ['logcat', '-c'], env);
@@ -270,6 +300,7 @@ const commands = {
   doctor: cmdDoctor,
   build: cmdBuild,
   dev: cmdDev,
+  'install-debug': cmdInstallDebug,
   logs: cmdLogs,
   mirror: cmdMirror,
   'release-local': cmdReleaseLocal,
