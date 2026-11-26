@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useRef } from 'react';
 import { Animated, FlatList, StyleSheet, Text, View } from 'react-native';
 import { AgentVisualizerState, CallChatMessage } from '../hooks/useLiveKitCall';
 
@@ -7,20 +7,20 @@ interface AgentChatTranscriptProps {
   agentState: AgentVisualizerState;
 }
 
-function ThinkingIndicator() {
+const ThinkingIndicator = memo(function ThinkingIndicator() {
   const pulse = useRef(new Animated.Value(0.35)).current;
 
   useEffect(() => {
     const anim = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, {
-          toValue: 1,
-          duration: 750,
+          toValue: 0.9,
+          duration: 720,
           useNativeDriver: true,
         }),
         Animated.timing(pulse, {
-          toValue: 0.35,
-          duration: 750,
+          toValue: 0.3,
+          duration: 720,
           useNativeDriver: true,
         }),
       ]),
@@ -37,68 +37,92 @@ function ThinkingIndicator() {
       </Animated.Text>
     </View>
   );
-}
+});
+
+const TranscriptItem = memo(function TranscriptItem({
+  item,
+}: {
+  item: CallChatMessage;
+}) {
+  const isUser = item.sender === 'user';
+  const isStreaming = item.isFinal === false;
+
+  if (isUser) {
+    return (
+      <View style={styles.userRow}>
+        <Text
+          style={[styles.userText, isStreaming && styles.streamingText]}
+        >
+          {item.text}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.agentRow}>
+      <Text
+        style={[styles.agentText, isStreaming && styles.streamingAgentText]}
+      >
+        {item.text}
+      </Text>
+    </View>
+  );
+});
 
 /**
- * LiveKit Agents UI-inspired borderless Chat Transcript:
- * - Agent turns render as clean left-aligned ghost text rows
- * - User turns render as right-aligned dark rounded secondary bubbles
- * - Live pulsing "Thinking..." indicator appears while Kallie is responding
+ * Clean, borderless real-time Chat Transcript:
+ * - Zero message bubbles, zero backgrounds, zero borders
+ * - User spoken/typed words appear live on the right in subtle light gray
+ * - Kallie's spoken responses stream live on the left in crisp white
+ * - Smoothly auto-scrolls as words arrive in real time
  */
-export function AgentChatTranscript({
+export const AgentChatTranscript = memo(function AgentChatTranscript({
   messages,
   agentState,
 }: AgentChatTranscriptProps) {
   const listRef = useRef<FlatList<CallChatMessage>>(null);
 
+  const scrollToLatest = useCallback(() => {
+    listRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
   useEffect(() => {
-    if (messages.length > 0 || agentState === 'thinking') {
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({ animated: true });
-      });
+    if (agentState === 'thinking') {
+      scrollToLatest();
     }
-  }, [agentState, messages]);
+  }, [agentState, scrollToLatest]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: CallChatMessage }) => <TranscriptItem item={item} />,
+    [],
+  );
+
+  const keyExtractor = useCallback((item: CallChatMessage) => item.id, []);
 
   return (
     <FlatList
       ref={listRef}
       style={styles.list}
       data={messages}
-      keyExtractor={(item) => item.id}
+      keyExtractor={keyExtractor}
+      renderItem={renderItem}
       contentContainerStyle={styles.listContent}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
+      onContentSizeChange={scrollToLatest}
+      removeClippedSubviews={false}
       ListEmptyComponent={
         agentState === 'thinking' ? undefined : (
           <View style={styles.emptyWrap}>
-            <Text style={styles.emptyText}>
-              Speak or type below — live transcript appears here.
-            </Text>
+            <Text style={styles.emptyText}>Speak or type below</Text>
           </View>
         )
       }
       ListFooterComponent={agentState === 'thinking' ? <ThinkingIndicator /> : undefined}
-      renderItem={({ item }) => {
-        const isUser = item.sender === 'user';
-        if (isUser) {
-          return (
-            <View style={styles.userRow}>
-              <View style={styles.userBubble}>
-                <Text style={styles.userText}>{item.text}</Text>
-              </View>
-            </View>
-          );
-        }
-
-        return (
-          <View style={styles.agentRow}>
-            <Text style={styles.agentText}>{item.text}</Text>
-          </View>
-        );
-      }}
     />
   );
-}
+});
 
 const styles = StyleSheet.create({
   list: {
@@ -106,67 +130,66 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   listContent: {
-    paddingHorizontal: 4,
-    paddingTop: 12,
-    paddingBottom: 20,
-    gap: 20,
+    paddingHorizontal: 6,
+    paddingTop: 8,
+    paddingBottom: 24,
+    gap: 22,
     flexGrow: 1,
   },
   emptyWrap: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
   },
   emptyText: {
     color: '#52525B',
     fontSize: 14,
     textAlign: 'center',
-    lineHeight: 20,
   },
   agentRow: {
     alignSelf: 'flex-start',
-    maxWidth: '92%',
+    maxWidth: '90%',
   },
   agentText: {
     color: '#FAFAFA',
-    fontSize: 15,
-    lineHeight: 23,
+    fontSize: 16,
+    lineHeight: 24,
     fontWeight: '400',
+    letterSpacing: -0.1,
+  },
+  streamingAgentText: {
+    color: '#E4E4E7',
   },
   userRow: {
     alignSelf: 'flex-end',
-    maxWidth: '82%',
-  },
-  userBubble: {
-    backgroundColor: '#1C1C1F',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    maxWidth: '84%',
   },
   userText: {
-    color: '#FAFAFA',
+    color: '#A1A1AA',
     fontSize: 15,
-    lineHeight: 22,
+    lineHeight: 23,
     fontWeight: '400',
+    textAlign: 'right',
+    letterSpacing: -0.1,
+  },
+  streamingText: {
+    color: '#D4D4D8',
   },
   thinkingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginTop: 4,
+    marginTop: 2,
   },
   thinkingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: '#71717A',
   },
   thinkingText: {
     color: '#71717A',
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '400',
   },
 });

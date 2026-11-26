@@ -1,15 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
   Keyboard,
   KeyboardAvoidingView,
-  LayoutAnimation,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -68,6 +68,12 @@ const DEFAULT_CONTROLS: Required<AgentControlBarControls> = {
   chat: true,
 };
 
+/**
+ * Pure GPU-animated Voice & Transcript Canvas:
+ * - One persistent `AgentAudioVisualizerAura` smoothly scales and glides via
+ *   native transforms (never unmounted or resized on state/chat transitions).
+ * - Zero LayoutAnimation conflicts, zero freeze when ending a call with chat open.
+ */
 export function ActiveCallView({
   isSessionActive = true,
   isCallReady = true,
@@ -88,44 +94,50 @@ export function ActiveCallView({
   onToggleScreenShare,
   onEndCall,
 }: ActiveCallViewProps) {
+  const { height: windowHeight } = useWindowDimensions();
   const [chatOpen, setChatOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
-  // Separate smooth GPU animations:
-  // - promptAnim fades out immediately on tap (0ms latency)
-  // - dockAnim glides in once the AI agent is actually connected & ready
-  const promptAnim = useRef(new Animated.Value(isSessionActive ? 0 : 1)).current;
-  const dockAnim = useRef(
-    new Animated.Value(isSessionActive && isCallReady ? 1 : 0),
-  ).current;
-
   const showControls = isSessionActive && isCallReady;
+  const showTranscript = showControls && chatOpen;
+
+  // All 3 transitions run strictly on the native GPU driver (60fps, zero JS lockups)
+  const promptAnim = useRef(new Animated.Value(isSessionActive ? 0 : 1)).current;
+  const dockAnim = useRef(new Animated.Value(showControls ? 1 : 0)).current;
+  const chatAnim = useRef(new Animated.Value(showTranscript ? 1 : 0)).current;
 
   useEffect(() => {
     if (!showControls && chatOpen) {
       Keyboard.dismiss();
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setChatOpen(false);
       setDraft('');
     }
+  }, [chatOpen, showControls]);
 
+  useEffect(() => {
     Animated.parallel([
       Animated.timing(promptAnim, {
         toValue: isSessionActive ? 0 : 1,
-        duration: isSessionActive ? 200 : 260,
+        duration: isSessionActive ? 190 : 280,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(dockAnim, {
         toValue: showControls ? 1 : 0,
-        duration: showControls ? 280 : 200,
+        duration: showControls ? 280 : 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(chatAnim, {
+        toValue: showTranscript ? 1 : 0,
+        duration: showTranscript ? 280 : 240,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
     ]).start();
-  }, [chatOpen, dockAnim, isSessionActive, promptAnim, showControls]);
+  }, [chatAnim, dockAnim, isSessionActive, promptAnim, showControls, showTranscript]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -160,26 +172,21 @@ export function ActiveCallView({
 
   const isConnected = status === 'connected' || status === 'agent_speaking';
 
-  const handleToggleChat = () => {
-    LayoutAnimation.configureNext({
-      duration: 240,
-      update: { type: LayoutAnimation.Types.easeInEaseOut },
-      create: {
-        type: LayoutAnimation.Types.easeInEaseOut,
-        property: LayoutAnimation.Properties.opacity,
-      },
-      delete: {
-        type: LayoutAnimation.Types.easeInEaseOut,
-        property: LayoutAnimation.Properties.opacity,
-      },
-    });
+  const handleToggleChat = useCallback(() => {
     setChatOpen((prev) => {
       if (prev) Keyboard.dismiss();
       return !prev;
     });
-  };
+  }, []);
 
-  const handleSend = async () => {
+  const handleEndPress = useCallback(() => {
+    Keyboard.dismiss();
+    setChatOpen(false);
+    setDraft('');
+    onEndCall();
+  }, [onEndCall]);
+
+  const handleSend = useCallback(async () => {
     const trimmed = draft.trim();
     if (!trimmed || sending) return;
     setSending(true);
@@ -189,9 +196,27 @@ export function ActiveCallView({
     } finally {
       setSending(false);
     }
-  };
+  }, [draft, onSendMessage, sending]);
 
   const canSend = Boolean(draft.trim()) && !sending && isConnected;
+
+  // Distance Aura smoothly glides upward when transcript opens
+  const raisedTranslateY = -Math.round(Math.max(210, windowHeight * 0.36));
+
+  const auraTranslateY = chatAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, raisedTranslateY],
+  });
+
+  const auraScale = chatAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0.3],
+  });
+
+  const transcriptTranslateY = chatAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [20, 0],
+  });
 
   const promptTranslateY = promptAnim.interpolate({
     inputRange: [0, 1],
@@ -216,62 +241,76 @@ export function ActiveCallView({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        {/* Main Stage: Perfectly centered, seamless unclipped Aura (no borders or dividers) */}
-        <View style={[styles.stage, chatOpen && styles.stageTranscript]}>
-          <Pressable
-            onPress={!isSessionActive ? onStartCall : !isCallReady ? onEndCall : undefined}
-            disabled={showControls}
-            style={({ pressed }) => [
-              chatOpen ? styles.raisedAuraHeader : styles.auraWrap,
-              !showControls && pressed && styles.auraPressed,
+        {/* Persistent Centered Aura Layer — smoothly scales & glides via pure GPU transforms */}
+        <View style={styles.auraBackdrop} pointerEvents="box-none">
+          <Animated.View
+            style={[
+              styles.auraAnimatedBox,
+              {
+                transform: [{ translateY: auraTranslateY }, { scale: auraScale }],
+              },
             ]}
-            accessibilityLabel={
-              !isSessionActive
-                ? 'Tap Aura to talk'
-                : !isCallReady
-                  ? 'Connecting to Kallie, tap to cancel'
-                  : 'Kallie Aura visualizer'
-            }
           >
-            <AgentAudioVisualizerAura
-              size={chatOpen ? 'sm' : 'xl'}
-              connectionStatus={effectiveConnectionStatus}
-              state={resolvedState}
-              audioLevel={isSessionActive ? audioLevel : 0.14}
-              colorShift={0.3}
-              themeMode="dark"
-            />
-          </Pressable>
-
-          {!chatOpen ? (
-            <Animated.View
-              style={[
-                styles.promptWrap,
-                {
-                  opacity: promptAnim,
-                  transform: [{ translateY: promptTranslateY }],
-                },
+            <Pressable
+              onPress={!isSessionActive ? onStartCall : !isCallReady ? handleEndPress : undefined}
+              disabled={showControls}
+              style={({ pressed }) => [
+                styles.auraTouch,
+                !showControls && pressed && styles.auraPressed,
               ]}
-              pointerEvents="none"
+              accessibilityLabel={
+                !isSessionActive
+                  ? 'Tap Aura to talk'
+                  : !isCallReady
+                    ? 'Connecting to Kallie, tap to cancel'
+                    : 'Kallie Aura visualizer'
+              }
             >
-              <Text style={styles.promptText}>Tap Aura to talk.</Text>
-            </Animated.View>
-          ) : null}
+              <AgentAudioVisualizerAura
+                size="xl"
+                connectionStatus={effectiveConnectionStatus}
+                state={resolvedState}
+                audioLevel={isSessionActive ? audioLevel : 0.14}
+                colorShift={0.3}
+                themeMode="dark"
+              />
+            </Pressable>
+          </Animated.View>
 
-          {chatOpen ? (
-            <View style={styles.transcriptBody}>
-              <AgentChatTranscript messages={messages} agentState={resolvedState} />
-            </View>
-          ) : null}
+          <Animated.View
+            style={[
+              styles.promptWrap,
+              {
+                opacity: promptAnim,
+                transform: [{ translateY: promptTranslateY }],
+              },
+            ]}
+            pointerEvents="none"
+          >
+            <Text style={styles.promptText}>Tap Aura to talk.</Text>
+          </Animated.View>
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
 
-        {/* Smoothly animated LiveKit Control Bar (floats cleanly at bottom without offsetting centered Aura) */}
+        {/* Borderless Real-Time Chat Transcript Layer — fades cleanly in/out without blocking Aura */}
+        <Animated.View
+          style={[
+            styles.transcriptLayer,
+            {
+              opacity: chatAnim,
+              transform: [{ translateY: transcriptTranslateY }],
+            },
+          ]}
+          pointerEvents={showTranscript ? 'auto' : 'none'}
+        >
+          <AgentChatTranscript messages={messages} agentState={resolvedState} />
+        </Animated.View>
+
+        {/* Smoothly animated LiveKit Control Bar */}
         <Animated.View
           style={[
             styles.controlDock,
-            !chatOpen && styles.controlDockFloating,
             {
               opacity: dockAnim,
               transform: [{ translateY: dockTranslateY }],
@@ -279,7 +318,7 @@ export function ActiveCallView({
           ]}
           pointerEvents={showControls ? 'auto' : 'none'}
         >
-          {chatOpen && activeControls.chat ? (
+          {showTranscript && activeControls.chat ? (
             <View style={styles.composerRow}>
               <TextInput
                 style={styles.composerInput}
@@ -378,7 +417,7 @@ export function ActiveCallView({
                   styles.endBtn,
                   pressed && styles.endBtnPressed,
                 ]}
-                onPress={onEndCall}
+                onPress={handleEndPress}
                 accessibilityLabel="Leave call"
               >
                 <HangupIcon color="#F87171" />
@@ -401,18 +440,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 20,
+    justifyContent: 'flex-end',
   },
-  stage: {
-    flex: 1,
-    justifyContent: 'center',
+  auraBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: 'center',
-    width: '100%',
+    justifyContent: 'center',
   },
-  stageTranscript: {
-    justifyContent: 'flex-start',
-    paddingBottom: 10,
+  auraAnimatedBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  auraWrap: {
+  auraTouch: {
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -420,7 +463,9 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.96 }],
   },
   promptWrap: {
-    marginTop: 6,
+    position: 'absolute',
+    top: '50%',
+    marginTop: 158,
   },
   promptText: {
     color: '#71717A',
@@ -429,24 +474,20 @@ const styles = StyleSheet.create({
     letterSpacing: -0.1,
     textAlign: 'center',
   },
-  raisedAuraHeader: {
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 4,
-    paddingBottom: 6,
-  },
-  transcriptBody: {
-    flex: 1,
-    width: '100%',
-  },
   errorText: {
+    position: 'absolute',
+    bottom: 112,
     color: '#F87171',
     fontSize: 13,
-    marginTop: 14,
     textAlign: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 24,
     lineHeight: 19,
+  },
+  transcriptLayer: {
+    flex: 1,
+    width: '100%',
+    marginTop: 108,
+    marginBottom: 12,
   },
   controlDock: {
     width: '100%',
@@ -455,12 +496,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.12)',
     borderRadius: 31,
     padding: 10,
-  },
-  controlDockFloating: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 20,
   },
   composerRow: {
     flexDirection: 'row',

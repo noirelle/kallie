@@ -34,6 +34,7 @@ export interface CallChatMessage {
   sender: 'user' | 'kallie';
   text: string;
   timestamp: number;
+  isFinal?: boolean;
 }
 
 type LiveKitNativeModule = {
@@ -148,11 +149,15 @@ export function useLiveKitCall(params: {
           if (isFinal) {
             finalizedSegmentsRef.current.add(id);
           }
-          if (prev[idx].text === cleaned) {
+          if (prev[idx].text === cleaned && prev[idx].isFinal === (isFinal || prev[idx].isFinal)) {
             return prev;
           }
           const next = [...prev];
-          next[idx] = { ...next[idx], text: cleaned };
+          next[idx] = {
+            ...next[idx],
+            text: cleaned,
+            isFinal: isFinal || next[idx].isFinal,
+          };
           return next;
         }
 
@@ -176,7 +181,7 @@ export function useLiveKitCall(params: {
           finalizedSegmentsRef.current.add(id);
         }
 
-        const next = [...prev, { id, sender, text: cleaned, timestamp }];
+        const next = [...prev, { id, sender, text: cleaned, timestamp, isFinal }];
         // Keep transcript chronologically ordered so user speech always precedes the reply it triggered
         next.sort((a, b) => a.timestamp - b.timestamp);
         return next;
@@ -215,9 +220,13 @@ export function useLiveKitCall(params: {
       setConnectionStatus('idle');
       setAudioLevel(0);
       setElapsedSeconds(0);
-      finalizedSegmentsRef.current.clear();
-      setMessages([]);
-      return;
+      // Defer clearing messages until the 260ms exit fade-out finishes so transcript
+      // fades out smoothly instead of vanishing abruptly on frame 0
+      const clearTimer = setTimeout(() => {
+        finalizedSegmentsRef.current.clear();
+        setMessages([]);
+      }, 300);
+      return () => clearTimeout(clearTimer);
     }
 
     if (!params.livekitUrl || !params.token) {
@@ -231,6 +240,8 @@ export function useLiveKitCall(params: {
     let cancelled = false;
     wasConnectedRef.current = false;
     endedManuallyRef.current = false;
+    finalizedSegmentsRef.current.clear();
+    setMessages([]);
     setStatus('connecting');
     setAgentState('connecting');
     setConnectionStatus('connecting');
@@ -484,6 +495,7 @@ export function useLiveKitCall(params: {
     return () => {
       cancelled = true;
       try {
+        room.removeAllListeners();
         room.unregisterTextStreamHandler('lk.transcription');
         room.unregisterTextStreamHandler('lk.chat');
       } catch {
@@ -491,11 +503,15 @@ export function useLiveKitCall(params: {
       }
       audioElementsRef.current.forEach((el) => el.remove());
       audioElementsRef.current = [];
-      void room.disconnect().catch(() => {});
       roomRef.current = null;
-      if (nativeLk) {
-        void nativeLk.AudioSession.stopAudioSession().catch(() => {});
-      }
+      // Defer heavy native WebRTC/AudioSession teardown slightly past the 260ms GPU
+      // exit transition so the UI thread stays locked at 60fps with zero freeze.
+      setTimeout(() => {
+        void room.disconnect().catch(() => {});
+        if (nativeLk) {
+          void nativeLk.AudioSession.stopAudioSession().catch(() => {});
+        }
+      }, 300);
     };
   }, [isEnabled, params.livekitUrl, params.sessionId, params.token, upsertMessage]);
 
@@ -574,19 +590,32 @@ export function useLiveKitCall(params: {
     roomRef.current = null;
     const sessionId = params.sessionId;
 
-    // Update UI immediately without blocking on WebRTC/HTTP teardown
+    // Detach listeners & update UI immediately without blocking on native WebRTC/HTTP teardown
+    if (room) {
+      try {
+        room.removeAllListeners();
+        room.unregisterTextStreamHandler('lk.transcription');
+        room.unregisterTextStreamHandler('lk.chat');
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+
     setStatus('disconnected');
     setAgentState('idle');
     setAgentReady(false);
     setConnectionStatus('idle');
 
-    if (room) {
-      void room.disconnect().catch(() => {});
-    }
-    if (sessionId) {
-      clearPendingCallConnection(sessionId);
-      void apiClient.endCall(sessionId).catch(() => {});
-    }
+    // Run native WebRTC disconnect + API cleanup right after the 260ms GPU exit animation
+    setTimeout(() => {
+      if (room) {
+        void room.disconnect().catch(() => {});
+      }
+      if (sessionId) {
+        clearPendingCallConnection(sessionId);
+        void apiClient.endCall(sessionId).catch(() => {});
+      }
+    }, 300);
   }, [params.sessionId]);
 
   return {
