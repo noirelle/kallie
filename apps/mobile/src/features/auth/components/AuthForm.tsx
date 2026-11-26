@@ -81,19 +81,14 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.main}>
-            <View style={styles.logoFrame}>
-              <Image
-                source={require('../../../../assets/icon.png')}
-                style={styles.logo}
-                resizeMode="contain"
-              />
-            </View>
+            <Image
+              source={require('../../../../assets/icon.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
 
             <Text style={styles.heading}>
               {isLogin ? 'Sign in to Kallie' : 'Create account'}
-            </Text>
-            <Text style={styles.subtitle}>
-              {isLogin ? 'Voice companion on your schedule' : 'Get started in seconds'}
             </Text>
 
             <View style={styles.form}>
@@ -161,20 +156,17 @@ export function AuthForm({ mode, onSwitchMode }: AuthFormProps) {
             </View>
           </View>
 
-          <View style={styles.bottomSection}>
-            <View style={styles.divider} />
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryBtn,
-                pressed && styles.secondaryBtnPressed,
-              ]}
-              onPress={onSwitchMode}
-            >
-              <Text style={styles.secondaryBtnText}>
-                {isLogin ? 'Create new account' : 'Sign in instead'}
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            style={({ pressed }) => [
+              styles.secondaryBtn,
+              pressed && styles.secondaryBtnPressed,
+            ]}
+            onPress={onSwitchMode}
+          >
+            <Text style={styles.secondaryBtnText}>
+              {isLogin ? 'Create new account' : 'Already have an account? Log in'}
+            </Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -193,8 +185,8 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'space-between',
     paddingHorizontal: 24,
-    paddingTop: 28,
-    paddingBottom: 20,
+    paddingTop: 32,
+    paddingBottom: 24,
   },
   main: {
     flex: 1,
@@ -202,62 +194,45 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 380,
     alignSelf: 'center',
-    paddingBottom: 24,
   },
-  logoFrame: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    backgroundColor: '#0B0B0B',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  logo: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
     alignSelf: 'center',
     marginBottom: 22,
   },
-  logo: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-  },
   heading: {
     color: '#FFFFFF',
-    fontSize: 26,
-    fontWeight: '700',
-    letterSpacing: -0.5,
+    fontSize: 24,
+    fontWeight: '600',
+    letterSpacing: -0.4,
     textAlign: 'center',
-  },
-  subtitle: {
-    color: '#71717A',
-    fontSize: 14,
-    textAlign: 'center',
-    marginTop: 6,
-    marginBottom: 30,
+    marginBottom: 28,
   },
   form: {
     gap: 12,
   },
   pillInput: {
-    backgroundColor: '#0D0D0D',
+    backgroundColor: '#111111',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     borderRadius: 999,
     paddingHorizontal: 20,
-    height: 54,
+    height: 52,
     color: '#FFFFFF',
     fontSize: 15,
   },
   passwordWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0D0D0D',
+    backgroundColor: '#111111',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     borderRadius: 999,
     paddingLeft: 20,
-    paddingRight: 18,
-    height: 54,
+    paddingRight: 16,
+    height: 52,
   },
   passwordInput: {
     flex: 1,
@@ -266,8 +241,8 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   pillInputFocused: {
-    borderColor: 'rgba(255, 255, 255, 0.38)',
-    backgroundColor: '#131313',
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+    backgroundColor: '#161616',
   },
   showBtn: {
     paddingLeft: 10,
@@ -281,56 +256,49 @@ const styles = StyleSheet.create({
     color: '#F87171',
     fontSize: 13,
     textAlign: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     marginTop: 2,
   },
   infoText: {
     color: '#E4E4E7',
     fontSize: 13,
     textAlign: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     marginTop: 2,
   },
   primaryBtn: {
     backgroundColor: '#FFFFFF',
     borderRadius: 999,
-    height: 54,
+    height: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
+    marginTop: 6,
   },
   primaryBtnPressed: {
     backgroundColor: '#E4E4E7',
-    transform: [{ scale: 0.99 }],
   },
   btnDisabled: {
-    opacity: 0.55,
+    opacity: 0.6,
   },
   primaryBtnText: {
     color: '#000000',
     fontSize: 15,
     fontWeight: '600',
   },
-  bottomSection: {
+  secondaryBtn: {
     width: '100%',
     maxWidth: 380,
     alignSelf: 'center',
-    gap: 16,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  secondaryBtn: {
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
     borderRadius: 999,
     height: 48,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 24,
   },
   secondaryBtnPressed: {
-    backgroundColor: '#0E0E0E',
+    backgroundColor: '#111111',
   },
   secondaryBtnText: {
     color: '#E4E4E7',

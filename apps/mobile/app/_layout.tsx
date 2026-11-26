@@ -11,7 +11,7 @@ import {
   registerBackgroundFcmHandler,
   useNativeCallKeep,
 } from '../src/features/calling/hooks/useNativeCallKeep';
-import { PermissionsSetupScreen } from '../src/features/onboarding/components/PermissionsSetupScreen';
+import { OnboardingFlow } from '../src/features/onboarding/components/OnboardingFlow';
 import { useOnboardingPermissions } from '../src/features/onboarding/hooks/useOnboardingPermissions';
 import { AppUpdateBanner } from '../src/features/updates/components/AppUpdateBanner';
 import { useAutoUpdate } from '../src/features/updates/hooks/useAutoUpdate';
@@ -40,7 +40,7 @@ class AppErrorBoundary extends Component<
             style={styles.retryBtn}
             onPress={() => this.setState({ hasError: false, message: '' })}
           >
-            <Text style={styles.retryBtnText}>TRY AGAIN</Text>
+            <Text style={styles.retryBtnText}>Try again</Text>
           </Pressable>
         </View>
       );
@@ -94,6 +94,16 @@ function RootLayoutContent() {
     }
   };
 
+  const handleCompleteOnboarding = useCallback(
+    async (intent: 'signup' | 'login') => {
+      await onboarding.completeOnboarding();
+      if (!user && isNavReady) {
+        router.replace(intent === 'signup' ? '/(auth)/register' : '/(auth)/login');
+      }
+    },
+    [isNavReady, onboarding, router, user],
+  );
+
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
@@ -101,12 +111,16 @@ function RootLayoutContent() {
 
       {onboarding.hydrated && !onboarding.completed ? (
         <View style={styles.fullOverlay}>
-          <PermissionsSetupScreen
+          <OnboardingFlow
+            discoverySource={onboarding.discoverySource}
+            onSelectDiscovery={onboarding.setDiscoverySource}
+            interests={onboarding.interests}
+            onToggleInterest={onboarding.toggleInterest}
             permissions={onboarding.permissions}
             busyKey={onboarding.busyKey}
             onToggleNotifications={onboarding.toggleNotifications}
             onToggleMicrophone={onboarding.toggleMicrophone}
-            onContinue={onboarding.completeOnboarding}
+            onComplete={handleCompleteOnboarding}
           />
         </View>
       ) : null}
@@ -188,13 +202,13 @@ const styles = StyleSheet.create({
   },
   retryBtn: {
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    borderRadius: 999,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
   },
   retryBtnText: {
     color: '#000000',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

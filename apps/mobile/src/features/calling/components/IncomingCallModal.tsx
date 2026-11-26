@@ -23,13 +23,11 @@ export function IncomingCallModal({
             <View style={styles.pulseDot} />
           </View>
 
-          <Text style={styles.incomingLabel}>Incoming call</Text>
-          <Text style={styles.title}>{session?.title || 'Kallie'}</Text>
-          {session?.ai_prompt ? (
-            <Text style={styles.prompt} numberOfLines={2}>
-              {session.ai_prompt}
-            </Text>
-          ) : null}
+          <Text style={styles.incomingLabel}>KALLIE IS CALLING</Text>
+          <Text style={styles.title}>{session?.title || 'Scheduled Callback'}</Text>
+          <Text style={styles.prompt} numberOfLines={3}>
+            {session?.ai_prompt}
+          </Text>
 
           <View style={styles.actions}>
             <Pressable
@@ -37,7 +35,7 @@ export function IncomingCallModal({
               onPress={onDecline}
               disabled={processing}
             >
-              <Text style={styles.btnText}>Decline</Text>
+              <Text style={styles.btnText}>DECLINE</Text>
             </Pressable>
 
             <Pressable
@@ -46,9 +44,9 @@ export function IncomingCallModal({
               disabled={processing}
             >
               {processing ? (
-                <ActivityIndicator color="#000000" />
+                <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.acceptBtnText}>Answer</Text>
+                <Text style={styles.btnText}>ANSWER</Text>
               )}
             </Pressable>
           </View>
@@ -126,19 +124,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   declineBtn: {
-    backgroundColor: '#1F1F23',
+    backgroundColor: '#DC2626',
   },
   acceptBtn: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#059669',
   },
   btnText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  acceptBtnText: {
-    color: '#000000',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
 });

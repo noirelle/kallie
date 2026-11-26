@@ -76,33 +76,26 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <View style={styles.statusPill}>
-          <View style={styles.statusDot} />
+        <View style={styles.brandRow}>
+          <Image
+            source={require('../assets/icon.png')}
+            style={styles.headerLogo}
+            resizeMode="contain"
+          />
           <Text style={styles.brand}>Kallie</Text>
         </View>
-
-        <Pressable
-          style={({ pressed }) => [styles.signOutBtn, pressed && styles.signOutBtnPressed]}
-          onPress={signOut}
-          hitSlop={8}
-        >
+        <Pressable onPress={signOut} hitSlop={8}>
           <Text style={styles.signOut}>Sign out</Text>
         </Pressable>
       </View>
 
       <View style={styles.center}>
-        <View style={styles.emblemOuter}>
-          <View style={styles.emblemInner}>
-            <Image
-              source={require('../assets/icon.png')}
-              style={styles.heroLogo}
-              resizeMode="contain"
-            />
-          </View>
-        </View>
-
-        <Text style={styles.heading}>Ready to talk</Text>
-        <Text style={styles.subheading}>Tap below to start a live call</Text>
+        <Image
+          source={require('../assets/icon.png')}
+          style={styles.heroLogo}
+          resizeMode="contain"
+        />
+        <Text style={styles.heading}>Talk with Kallie</Text>
 
         <Pressable
           style={({ pressed }) => [
@@ -113,37 +106,36 @@ export default function HomeScreen() {
           onPress={handleStartCall}
           disabled={starting}
         >
-          <Text style={styles.startBtnText}>{starting ? 'Connecting...' : 'Start call'}</Text>
+          <Text style={styles.startBtnText}>{starting ? 'Starting...' : 'Start call'}</Text>
         </Pressable>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         {upcoming.length > 0 ? (
-          <View style={styles.upcomingCard}>
+          <View style={styles.upcomingBlock}>
             <Text style={styles.upcomingLabel}>Upcoming</Text>
-            {upcoming.map((item, idx) => (
-              <View key={item.id}>
-                {idx > 0 ? <View style={styles.upcomingDivider} /> : null}
-                <View style={styles.upcomingRow}>
-                  <Text style={styles.reminderTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  <Text style={styles.reminderTime}>
-                    {item.next_run_at
-                      ? new Date(item.next_run_at).toLocaleTimeString([], {
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })
-                      : ''}
-                  </Text>
-                </View>
+            {upcoming.map((item) => (
+              <View key={item.id} style={styles.reminderPill}>
+                <Text style={styles.reminderTitle} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text style={styles.reminderTime}>
+                  {item.next_run_at
+                    ? new Date(item.next_run_at).toLocaleTimeString([], {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })
+                    : ''}
+                </Text>
               </View>
             ))}
           </View>
         ) : null}
       </View>
 
-      <Text style={styles.footerHint}>Ask by voice to schedule callbacks</Text>
+      <Text style={styles.footerHint}>
+        Ask by voice to schedule callbacks or reminders.
+      </Text>
     </SafeAreaView>
   );
 }
@@ -160,92 +152,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 8,
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#0D0D0D',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#FFFFFF',
+    paddingVertical: 14,
   },
   brand: {
-    color: '#FFFFFF',
-    fontSize: 13,
+    color: '#FAFAFA',
+    fontSize: 15,
     fontWeight: '600',
   },
-  signOutBtn: {
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  signOutBtnPressed: {
-    backgroundColor: '#111111',
-  },
   signOut: {
-    color: '#71717A',
-    fontSize: 13,
+    color: '#A1A1AA',
+    fontSize: 14,
     fontWeight: '500',
   },
   center: {
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    maxWidth: 380,
-    alignSelf: 'center',
   },
-  emblemOuter: {
-    width: 108,
-    height: 108,
-    borderRadius: 32,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+  brandRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 22,
+    gap: 8,
   },
-  emblemInner: {
-    width: 82,
-    height: 82,
-    borderRadius: 24,
-    backgroundColor: '#0D0D0D',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  headerLogo: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
   },
   heroLogo: {
-    width: 54,
-    height: 54,
-    borderRadius: 12,
+    width: 72,
+    height: 72,
+    borderRadius: 18,
+    marginBottom: 18,
   },
   heading: {
-    color: '#FFFFFF',
-    fontSize: 25,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-  },
-  subheading: {
-    color: '#71717A',
-    fontSize: 14,
-    marginTop: 6,
+    color: '#FAFAFA',
+    fontSize: 22,
+    fontWeight: '600',
+    letterSpacing: -0.3,
   },
   startBtn: {
-    marginTop: 28,
-    width: '100%',
-    maxWidth: 260,
-    height: 54,
+    marginTop: 24,
+    width: 220,
+    height: 52,
     backgroundColor: '#FFFFFF',
     borderRadius: 999,
     alignItems: 'center',
@@ -253,10 +202,9 @@ const styles = StyleSheet.create({
   },
   startBtnPressed: {
     backgroundColor: '#E4E4E7',
-    transform: [{ scale: 0.99 }],
   },
   startBtnDisabled: {
-    opacity: 0.55,
+    opacity: 0.6,
   },
   startBtnText: {
     color: '#000000',
@@ -269,46 +217,46 @@ const styles = StyleSheet.create({
     marginTop: 14,
     textAlign: 'center',
   },
-  upcomingCard: {
+  upcomingBlock: {
     marginTop: 32,
     width: '100%',
-    backgroundColor: '#0D0D0D',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 22,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
+    maxWidth: 320,
+    gap: 8,
   },
   upcomingLabel: {
     color: '#71717A',
     fontSize: 12,
     fontWeight: '500',
-    marginBottom: 10,
+    textAlign: 'center',
+    marginBottom: 2,
   },
-  upcomingDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  upcomingRow: {
+  reminderPill: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    backgroundColor: '#0A0A0A',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     gap: 12,
   },
   reminderTitle: {
     color: '#FAFAFA',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '500',
     flex: 1,
   },
   reminderTime: {
     color: '#A1A1AA',
-    fontSize: 13,
+    fontSize: 11,
   },
   footerHint: {
-    color: '#52525B',
+    color: '#71717A',
     fontSize: 12,
     textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 8,
   },
 });

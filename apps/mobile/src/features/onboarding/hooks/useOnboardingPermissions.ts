@@ -2,11 +2,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 import { Linking, PermissionsAndroid, Platform } from 'react-native';
 
-const ONBOARDING_STORAGE_KEY = 'kallie_permissions_onboarding_v1';
+const ONBOARDING_STORAGE_KEY = 'kallie_onboarding_v2';
 
 export interface PermissionStates {
   notifications: boolean;
   microphone: boolean;
+}
+
+export interface OnboardingSavedData {
+  completed: boolean;
+  discoverySource: string | null;
+  interests: string[];
 }
 
 async function checkAndroidNotificationPermission(): Promise<boolean> {
@@ -35,6 +41,8 @@ async function checkAndroidMicPermission(): Promise<boolean> {
 export function useOnboardingPermissions() {
   const [hydrated, setHydrated] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [discoverySource, setDiscoverySource] = useState<string | null>(null);
+  const [interests, setInterests] = useState<string[]>([]);
   const [permissions, setPermissions] = useState<PermissionStates>({
     notifications: false,
     microphone: false,
@@ -53,11 +61,16 @@ export function useOnboardingPermissions() {
     let active = true;
     const init = async () => {
       try {
-        const stored = await AsyncStorage.getItem(ONBOARDING_STORAGE_KEY);
-        if (active) {
-          setCompleted(stored === 'done');
+        const raw = await AsyncStorage.getItem(ONBOARDING_STORAGE_KEY);
+        if (active && raw) {
+          const parsed = JSON.parse(raw) as Partial<OnboardingSavedData>;
+          setCompleted(Boolean(parsed.completed));
+          setDiscoverySource(parsed.discoverySource ?? null);
+          setInterests(Array.isArray(parsed.interests) ? parsed.interests : []);
         }
         await refreshPermissions();
+      } catch {
+        // Ignore storage read errors
       } finally {
         if (active) {
           setHydrated(true);
@@ -106,8 +119,8 @@ export function useOnboardingPermissions() {
         const result = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
           {
-            title: 'Microphone Permission',
-            message: 'Kallie needs microphone access for live AI voice calls.',
+            title: 'Microphone permission',
+            message: 'Kallie needs microphone access for live voice calls.',
             buttonPositive: 'Allow',
             buttonNegative: 'Cancel',
           },
@@ -122,14 +135,32 @@ export function useOnboardingPermissions() {
     }
   }, [busyKey, permissions.microphone, refreshPermissions]);
 
-  const completeOnboarding = useCallback(async () => {
-    await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'done');
-    setCompleted(true);
+  const toggleInterest = useCallback((id: string) => {
+    setInterests((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
   }, []);
+
+  const completeOnboarding = useCallback(
+    async (overrides?: { discoverySource?: string | null; interests?: string[] }) => {
+      const payload: OnboardingSavedData = {
+        completed: true,
+        discoverySource: overrides?.discoverySource ?? discoverySource,
+        interests: overrides?.interests ?? interests,
+      };
+      await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(payload));
+      setCompleted(true);
+    },
+    [discoverySource, interests],
+  );
 
   return {
     hydrated,
     completed,
+    discoverySource,
+    setDiscoverySource,
+    interests,
+    toggleInterest,
     permissions,
     busyKey,
     toggleNotifications,
