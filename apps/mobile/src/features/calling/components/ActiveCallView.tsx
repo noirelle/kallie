@@ -53,6 +53,7 @@ interface ActiveCallViewProps {
   messages: CallChatMessage[];
   controls?: AgentControlBarControls;
   onStartCall?: () => void;
+  onStartCallPressIn?: () => void;
   onSendMessage: (text: string) => Promise<void>;
   onToggleMute: () => void;
   onToggleCamera?: () => void;
@@ -88,6 +89,7 @@ export function ActiveCallView({
   messages,
   controls = DEFAULT_CONTROLS,
   onStartCall,
+  onStartCallPressIn,
   onSendMessage,
   onToggleMute,
   onToggleCamera,
@@ -252,6 +254,7 @@ export function ActiveCallView({
             ]}
           >
             <Pressable
+              onPressIn={!isSessionActive ? onStartCallPressIn : undefined}
               onPress={!isSessionActive ? onStartCall : !isCallReady ? handleEndPress : undefined}
               disabled={showControls}
               style={({ pressed }) => [
@@ -293,19 +296,21 @@ export function ActiveCallView({
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
 
-        {/* Borderless Real-Time Chat Transcript Layer — fades cleanly in/out without blocking Aura */}
-        <Animated.View
-          style={[
-            styles.transcriptLayer,
-            {
-              opacity: chatAnim,
-              transform: [{ translateY: transcriptTranslateY }],
-            },
-          ]}
-          pointerEvents={showTranscript ? 'auto' : 'none'}
-        >
-          <AgentChatTranscript messages={messages} agentState={resolvedState} />
-        </Animated.View>
+        {/* Borderless Real-Time Chat Transcript Layer — mounted lazily when call controls & chat/messages are active */}
+        {showControls && (chatOpen || messages.length > 0) ? (
+          <Animated.View
+            style={[
+              styles.transcriptLayer,
+              {
+                opacity: chatAnim,
+                transform: [{ translateY: transcriptTranslateY }],
+              },
+            ]}
+            pointerEvents={showTranscript ? 'auto' : 'none'}
+          >
+            <AgentChatTranscript messages={messages} agentState={resolvedState} />
+          </Animated.View>
+        ) : null}
 
         {/* Smoothly animated LiveKit Control Bar */}
         <Animated.View

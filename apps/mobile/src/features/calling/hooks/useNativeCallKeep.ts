@@ -3,7 +3,21 @@ import { Platform } from 'react-native';
 import { apiClient } from '../../../lib/apiClient';
 import { setPendingCallConnection } from '../../../lib/callSessionStore';
 import { appEnv } from '../../../lib/env';
+import { scheduleAfterPaint } from '../../../lib/scheduleAfterPaint';
+import {
+  getPreferenceSync,
+  hasReminderBeenDeliveredSync,
+  markReminderDeliveredSync,
+  setPreferenceSync,
+} from '../../../lib/storage/localDb';
 import { nativeIncomingCall } from '../lib/nativeIncomingCall';
+
+const DEVICE_REG_HEARTBEAT_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+interface StoredDeviceRegistration {
+  fcmToken: string;
+  registeredAt: number;
+}
 
 type CallKeepModule = {
   setup: (options: Record<string, unknown>) => Promise<void>;
@@ -69,6 +83,13 @@ function getFirebaseMessaging(): FirebaseMessagingInstance | null {
 
 let callKeepConfigured = false;
 let backgroundHandlerRegistered = false;
+let androidChannelsEnsured = false;
+
+function ensureAndroidChannelsOnce(): void {
+  if (androidChannelsEnsured || Platform.OS !== 'android') return;
+  androidChannelsEnsured = true;
+  nativeIncomingCall.ensureChannels();
+}
 
 async function ensureIosCallKeepSetup(): Promise<CallKeepModule | null> {
   const callKeep = getCallKeep();
@@ -108,7 +129,7 @@ export function registerBackgroundFcmHandler(): void {
     return;
   }
 
-  nativeIncomingCall.ensureChannels();
+  ensureAndroidChannelsOnce();
 
   const messaging = getFirebaseMessaging();
   if (!messaging) return;
@@ -157,12 +178,6 @@ export function useNativeCallKeep(
   const onForegroundCallEnded = options?.onForegroundCallEnded;
 
   useEffect(() => {
-    if (Platform.OS === 'android') {
-      nativeIncomingCall.ensureChannels();
-    }
-  }, []);
-
-  useEffect(() => {
     if (!enabled || !userId || Platform.OS === 'web') {
       return;
     }
@@ -206,28 +221,49 @@ export function useNativeCallKeep(
       }
 
       if (Platform.OS === 'android') {
-        nativeIncomingCall.ensureChannels();
+        ensureAndroidChannelsOnce();
 
         const messaging = getFirebaseMessaging();
         if (!messaging) return;
 
         try {
           await messaging.requestPermission();
+          if (cancelled) return;
           const fcmToken = await messaging.getToken();
           if (fcmToken && !cancelled) {
-            await apiClient.registerDevice({
-              platform: 'android',
-              fcmToken,
-              deviceName: 'Android Device',
-            });
+            const prefKey = `fcm_reg:${userId}`;
+            const saved = getPreferenceSync<StoredDeviceRegistration>(prefKey);
+            const isFresh =
+              saved &&
+              saved.fcmToken === fcmToken &&
+              Date.now() - saved.registeredAt < DEVICE_REG_HEARTBEAT_MS;
+
+            if (!isFresh) {
+              await apiClient.registerDevice({
+                platform: 'android',
+                fcmToken,
+                deviceName: 'Android Device',
+              });
+              setPreferenceSync(prefKey, {
+                fcmToken,
+                registeredAt: Date.now(),
+              });
+            }
           }
 
+          if (cancelled) return;
           unsubTokenRefresh = messaging.onTokenRefresh((nextToken) => {
             void apiClient
               .registerDevice({
                 platform: 'android',
                 fcmToken: nextToken,
                 deviceName: 'Android Device',
+              })
+              .then(() => {
+                setPreferenceSync(`fcm_reg:${userId}`, {
+                  fcmToken: nextToken,
+                  registeredAt: Date.now(),
+                });
               })
               .catch(() => {});
           });
@@ -252,13 +288,22 @@ export function useNativeCallKeep(
             }
 
             if (data.type === 'call_reminder' && data.scheduleId) {
+              const dedupeKey = `${data.scheduleId}:${data.scheduledAt || data.scheduledTimeText || ''}`;
+              if (hasReminderBeenDeliveredSync(dedupeKey)) {
+                return;
+              }
+              markReminderDeliveredSync(dedupeKey, 'fcm_push');
               const title = remoteMessage.notification?.title || 'Kallie';
               const body =
                 remoteMessage.notification?.body ||
                 (data.scheduledTimeText
                   ? `Kallie will call you in ${data.minutesBefore || '10'} minutes (${data.scheduledTimeText}).`
                   : `Kallie will call you in ${data.minutesBefore || '10'} minutes.`);
-              nativeIncomingCall.showReminderNotification(data.scheduleId, title, body);
+              nativeIncomingCall.showReminderNotification(
+                dedupeKey,
+                title,
+                body,
+              );
             }
           });
         } catch {
@@ -267,10 +312,15 @@ export function useNativeCallKeep(
       }
     };
 
-    void init();
+    const cancelDeferred = scheduleAfterPaint(() => {
+      if (!cancelled) {
+        void init();
+      }
+    });
 
     return () => {
       cancelled = true;
+      cancelDeferred();
       unsubTokenRefresh?.();
       unsubForegroundMsg?.();
       activeCallKeep?.removeEventListener('answerCall');

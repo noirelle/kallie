@@ -1,13 +1,11 @@
 import { JoinCallResponse } from '../types/database';
 import { appEnv } from './env';
-import { supabase } from './supabaseClient';
+import { getValidAccessToken } from './storage/authSessionCache';
 
 async function authorizedFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const accessToken = await getValidAccessToken();
 
-  if (!session?.access_token) {
+  if (!accessToken) {
     throw new Error('You must be signed in to perform this action.');
   }
 
@@ -15,7 +13,7 @@ async function authorizedFetch<T>(path: string, init?: RequestInit): Promise<T> 
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
+      Authorization: `Bearer ${accessToken}`,
       ...(init?.headers || {}),
     },
   });
@@ -29,10 +27,26 @@ async function authorizedFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 export const apiClient = {
-  createTestCall: (payload?: { title?: string; aiPrompt?: string; voice?: string }) =>
-    authorizedFetch<JoinCallResponse>('/calls/test', {
+  createTestCall: (payload?: {
+    title?: string;
+    aiPrompt?: string;
+    voice?: string;
+    standby?: boolean;
+  }) =>
+    authorizedFetch<JoinCallResponse & { standby?: boolean }>('/calls/test', {
       method: 'POST',
       body: JSON.stringify(payload || {}),
+    }),
+
+  activateStandbyCall: (payload: {
+    sessionId: string;
+    roomName: string;
+    title?: string;
+    aiPrompt?: string;
+  }) =>
+    authorizedFetch<{ ok: boolean; sessionId: string }>('/calls/standby/activate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
 
   acceptCall: (sessionId: string) =>

@@ -63,31 +63,35 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
     ? AURA_STATUS_PALETTES[AURA_DEMO_SEQUENCE[demoIndex]]
     : resolveAuraPalette(connectionStatus, color);
 
-  // Smooth, flicker-free RGB interpolation between previous and target palettes
-  const [palettePair, setPalettePair] = useState<{
-    from: AuraColorPalette;
-    to: AuraColorPalette;
-  }>(() => ({ from: targetPalette, to: targetPalette }));
-  const colorProgress = useRef(new Animated.Value(1)).current;
-  const activeToRef = useRef<AuraColorPalette>(targetPalette);
+  // Pure-GPU (useNativeDriver: true) palette cross-fade so status color shifts
+  // never block the JS thread during Aura tap or WebRTC signaling.
+  const [activePalette, setActivePalette] = useState<AuraColorPalette>(targetPalette);
+  const [exitingPalette, setExitingPalette] = useState<AuraColorPalette | null>(null);
+  const fadeProgress = useRef(new Animated.Value(1)).current;
+  const activePrimaryRef = useRef<string>(targetPalette.primary);
 
   useEffect(() => {
-    if (targetPalette.primary === activeToRef.current.primary) {
+    if (targetPalette.primary === activePrimaryRef.current) {
       return;
     }
-    const prevTo = activeToRef.current;
-    activeToRef.current = targetPalette;
-    colorProgress.stopAnimation();
-    colorProgress.setValue(0);
-    setPalettePair({ from: prevTo, to: targetPalette });
+    const prevPalette = activePalette;
+    activePrimaryRef.current = targetPalette.primary;
+    setExitingPalette(prevPalette);
+    setActivePalette(targetPalette);
+    fadeProgress.stopAnimation();
+    fadeProgress.setValue(0);
 
-    Animated.timing(colorProgress, {
+    Animated.timing(fadeProgress, {
       toValue: 1,
-      duration: 320,
+      duration: 280,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [colorProgress, targetPalette]);
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setExitingPalette(null);
+      }
+    });
+  }, [activePalette, fadeProgress, targetPalette]);
 
   // Continuous unbroken native GPU rotation loops
   const rotA = useRef(new Animated.Value(0)).current;
@@ -243,22 +247,10 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
     outputRange: [0.32, 0.85],
   });
 
-  // Smooth RGB color channels (no flicker, no alpha dip at midpoint)
-  const primaryColor = colorProgress.interpolate({
+  // Pure-GPU opacity cross-fade channels (zero JS-thread frames)
+  const exitingOpacity = fadeProgress.interpolate({
     inputRange: [0, 1],
-    outputRange: [palettePair.from.primary, palettePair.to.primary],
-  });
-  const secondaryColor = colorProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [palettePair.from.secondary, palettePair.to.secondary],
-  });
-  const highlightColor = colorProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [palettePair.from.highlight, palettePair.to.highlight],
-  });
-  const glowColor = colorProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [palettePair.from.glowRgba, palettePair.to.glowRgba],
+    outputRange: [1, 0],
   });
 
   const ringSize = RING_DIAMETERS[size];
@@ -274,23 +266,16 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
   // Generous unclipped margin on every side so glow never hits a container edge
   const canvasSize = haloOuter + 36;
 
-  return (
-    <Animated.View
-      style={[
-        styles.root,
-        { width: canvasSize, height: canvasSize, opacity: masterOpacity },
-        style,
-      ]}
-      pointerEvents="none"
-    >
-      {/* Layered soft 360° ambient glow rings (smoothly RGB-interpolated, zero clipping) */}
+  const renderPaletteRings = (palette: AuraColorPalette) => (
+    <>
+      {/* Layered soft 360° ambient glow rings */}
       <Animated.View
         style={[
           styles.motionLayer,
           { opacity: haloOpacity, transform: [{ scale: haloScale }] },
         ]}
       >
-        <Animated.View
+        <View
           style={[
             styles.circle,
             {
@@ -298,12 +283,12 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
               height: haloOuter,
               borderRadius: haloOuter / 2,
               borderWidth: Math.max(4, stroke * 3.2),
-              borderColor: glowColor,
+              borderColor: palette.glowRgba,
               opacity: 0.14,
             },
           ]}
         />
-        <Animated.View
+        <View
           style={[
             styles.circle,
             {
@@ -311,14 +296,14 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
               height: haloMid,
               borderRadius: haloMid / 2,
               borderWidth: Math.max(3, stroke * 2.0),
-              borderColor: glowColor,
+              borderColor: palette.glowRgba,
               opacity: 0.28,
             },
           ]}
         />
       </Animated.View>
 
-      {/* Secondary shifted organic elliptical ring (GPU motion wrapper + RGB ring child) */}
+      {/* Secondary shifted organic elliptical ring */}
       <Animated.View
         style={[
           styles.motionLayer,
@@ -333,7 +318,7 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
           },
         ]}
       >
-        <Animated.View
+        <View
           style={[
             styles.circle,
             {
@@ -341,7 +326,7 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
               height: outerRing,
               borderRadius: outerRing / 2,
               borderWidth: stroke * 1.15,
-              borderColor: secondaryColor,
+              borderColor: palette.secondary,
             },
           ]}
         />
@@ -362,7 +347,7 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
           },
         ]}
       >
-        <Animated.View
+        <View
           style={[
             styles.circle,
             {
@@ -370,7 +355,7 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
               height: midRing,
               borderRadius: midRing / 2,
               borderWidth: stroke,
-              borderColor: primaryColor,
+              borderColor: palette.primary,
             },
           ]}
         />
@@ -391,7 +376,7 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
           },
         ]}
       >
-        <Animated.View
+        <View
           style={[
             styles.circle,
             {
@@ -399,10 +384,30 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
               height: innerRing,
               borderRadius: innerRing / 2,
               borderWidth: Math.max(1, stroke * 0.55),
-              borderColor: highlightColor,
+              borderColor: palette.highlight,
             },
           ]}
         />
+      </Animated.View>
+    </>
+  );
+
+  return (
+    <Animated.View
+      style={[
+        styles.root,
+        { width: canvasSize, height: canvasSize, opacity: masterOpacity },
+        style,
+      ]}
+      pointerEvents="none"
+    >
+      {exitingPalette ? (
+        <Animated.View style={[styles.motionLayer, { opacity: exitingOpacity }]}>
+          {renderPaletteRings(exitingPalette)}
+        </Animated.View>
+      ) : null}
+      <Animated.View style={[styles.motionLayer, { opacity: fadeProgress }]}>
+        {renderPaletteRings(activePalette)}
       </Animated.View>
     </Animated.View>
   );

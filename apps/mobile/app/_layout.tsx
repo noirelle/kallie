@@ -11,28 +11,52 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { scheduleAfterPaint } from '../src/lib/scheduleAfterPaint';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { IncomingCallModal } from '../src/features/calling/components/IncomingCallModal';
 import {
   ActiveCallProvider,
-  useActiveCall,
+  useActiveCallActions,
 } from '../src/features/calling/context/ActiveCallContext';
 import { useIncomingCall } from '../src/features/calling/hooks/useIncomingCall';
-import { registerLiveKitGlobals } from '../src/features/calling/hooks/useLiveKitCall';
 import {
   registerBackgroundFcmHandler,
   useNativeCallKeep,
 } from '../src/features/calling/hooks/useNativeCallKeep';
-import { AuraGuideSlider } from '../src/features/onboarding/components/AuraGuideSlider';
-import { OnboardingFlow } from '../src/features/onboarding/components/OnboardingFlow';
 import { useAuraGuide } from '../src/features/onboarding/hooks/useAuraGuide';
 import { useOnboardingPermissions } from '../src/features/onboarding/hooks/useOnboardingPermissions';
 import { AppUpdateBanner } from '../src/features/updates/components/AppUpdateBanner';
 import { useAutoUpdate } from '../src/features/updates/hooks/useAutoUpdate';
+import { startRealtimeSync, syncUserData } from '../src/features/schedules/lib/syncEngine';
 
-// Register native WebRTC globals & Android killed/background FCM handler once at module load
-registerLiveKitGlobals();
+// Register Android killed/background FCM handler once at module load (required by RNFB).
+// LiveKit native globals are initialized lazily post-first-paint by ActiveCallProvider.
 registerBackgroundFcmHandler();
+
+let cachedOnboardingFlow:
+  | typeof import('../src/features/onboarding/components/OnboardingFlow').OnboardingFlow
+  | null = null;
+let cachedAuraGuideSlider:
+  | typeof import('../src/features/onboarding/components/AuraGuideSlider').AuraGuideSlider
+  | null = null;
+
+function getOnboardingFlowComponent() {
+  if (!cachedOnboardingFlow) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('../src/features/onboarding/components/OnboardingFlow') as typeof import('../src/features/onboarding/components/OnboardingFlow');
+    cachedOnboardingFlow = mod.OnboardingFlow;
+  }
+  return cachedOnboardingFlow;
+}
+
+function getAuraGuideSliderComponent() {
+  if (!cachedAuraGuideSlider) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('../src/features/onboarding/components/AuraGuideSlider') as typeof import('../src/features/onboarding/components/AuraGuideSlider');
+    cachedAuraGuideSlider = mod.AuraGuideSlider;
+  }
+  return cachedAuraGuideSlider;
+}
 
 class AppErrorBoundary extends Component<
   { children: ReactNode },
@@ -71,7 +95,7 @@ function RootLayoutContent() {
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
   const autoUpdate = useAutoUpdate();
-  const activeCall = useActiveCall();
+  const activeCall = useActiveCallActions();
 
   const isNavReady = Boolean(rootNavigationState?.key);
 
@@ -142,6 +166,31 @@ function RootLayoutContent() {
     return () => sub.remove();
   }, []);
 
+  // Keep local SQLite schedules & call history synchronized via 1 unified Realtime channel + delta pull.
+  // Deferred past initial frame paint so Home Aura renders with zero boot contention.
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid) return;
+
+    let stopRealtime: (() => void) | null = null;
+    const cancelDeferred = scheduleAfterPaint(() => {
+      stopRealtime = startRealtimeSync(uid);
+      void syncUserData(uid);
+    });
+
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void syncUserData(uid);
+      }
+    });
+
+    return () => {
+      cancelDeferred();
+      stopRealtime?.();
+      sub.remove();
+    };
+  }, [user?.id]);
+
   useEffect(() => {
     if (isBooting || !isNavReady) return;
 
@@ -171,29 +220,39 @@ function RootLayoutContent() {
       <StatusBar style="light" hidden animated />
       <Slot />
 
-      {showOnboarding ? (
-        <View style={styles.fullOverlay}>
-          <OnboardingFlow
-            discoverySource={onboarding.discoverySource}
-            onSelectDiscovery={onboarding.setDiscoverySource}
-            interests={onboarding.interests}
-            onToggleInterest={onboarding.toggleInterest}
-            permissions={onboarding.permissions}
-            busyKey={onboarding.busyKey}
-            showFullScreenIntentToggle={onboarding.supportsFullScreenIntentToggle}
-            onToggleNotifications={onboarding.toggleNotifications}
-            onToggleMicrophone={onboarding.toggleMicrophone}
-            onToggleFullScreenIntent={onboarding.toggleFullScreenIntent}
-            onComplete={handleCompleteOnboarding}
-          />
-        </View>
-      ) : null}
+      {showOnboarding
+        ? (() => {
+            const OnboardingFlowComp = getOnboardingFlowComponent();
+            return (
+              <View style={styles.fullOverlay}>
+                <OnboardingFlowComp
+                  discoverySource={onboarding.discoverySource}
+                  onSelectDiscovery={onboarding.setDiscoverySource}
+                  interests={onboarding.interests}
+                  onToggleInterest={onboarding.toggleInterest}
+                  permissions={onboarding.permissions}
+                  busyKey={onboarding.busyKey}
+                  showFullScreenIntentToggle={onboarding.supportsFullScreenIntentToggle}
+                  onToggleNotifications={onboarding.toggleNotifications}
+                  onToggleMicrophone={onboarding.toggleMicrophone}
+                  onToggleFullScreenIntent={onboarding.toggleFullScreenIntent}
+                  onComplete={handleCompleteOnboarding}
+                />
+              </View>
+            );
+          })()
+        : null}
 
-      {showAuraGuide ? (
-        <View style={styles.fullOverlay}>
-          <AuraGuideSlider onComplete={auraGuide.completeGuide} />
-        </View>
-      ) : null}
+      {showAuraGuide
+        ? (() => {
+            const AuraGuideSliderComp = getAuraGuideSliderComponent();
+            return (
+              <View style={styles.fullOverlay}>
+                <AuraGuideSliderComp onComplete={auraGuide.completeGuide} />
+              </View>
+            );
+          })()
+        : null}
 
       {showBootOverlay ? (
         <View style={styles.loaderOverlay}>

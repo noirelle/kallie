@@ -14,7 +14,14 @@ export interface KallieJobMetadata {
   aiPrompt?: string;
   voice?: string;
   isScheduledCallback?: boolean;
+  standby?: boolean;
+  standbyTimeoutMs?: number;
 }
+
+export const CONTROL_DATA_TOPIC = 'kallie.control';
+const DEFAULT_STANDBY_TIMEOUT_MS = 45_000;
+const MIN_STANDBY_TIMEOUT_MS = 10_000;
+const MAX_STANDBY_TIMEOUT_MS = 90_000;
 
 const DEFAULT_GIRLFRIEND_PERSONA = [
   'You are Kallie, the user\'s sweet, caring, playful, and genuinely affectionate girlfriend and personal AI voice assistant.',
@@ -41,6 +48,32 @@ export function parseJobMetadata(rawMetadata: string | undefined): KallieJobMeta
   }
 }
 
+const VALID_THINKING_LEVELS = new Set(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']);
+
+/**
+ * Resolves the Gemini Live thinking configuration for low-latency voice turns.
+ * Gemini 3.1 Flash Live defaults to MEDIUM thinking when unspecified, adding
+ * 400-1000ms to every greeting and reply; defaulting to MINIMAL cuts TTFB while
+ * keeping tool-calling responsive. Override via GEMINI_THINKING_LEVEL.
+ */
+export function resolveThinkingConfig(
+  modelName: string,
+  envLevel = process.env.GEMINI_THINKING_LEVEL,
+): { thinkingLevel: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' } | undefined {
+  const normalizedModel = modelName.replace(/^models\//, '');
+  if (!normalizedModel.startsWith('gemini-3.1-')) {
+    return undefined;
+  }
+  const normalizedLevel = (envLevel || 'MINIMAL').trim().toUpperCase();
+  if (normalizedLevel === 'DEFAULT' || normalizedLevel === 'UNSPECIFIED') {
+    return undefined;
+  }
+  const level = VALID_THINKING_LEVELS.has(normalizedLevel) ? normalizedLevel : 'MINIMAL';
+  return {
+    thinkingLevel: level as 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH',
+  };
+}
+
 function getCurrentManilaDateTime(): string {
   const now = new Date();
   const formatted = new Intl.DateTimeFormat('en-CA', {
@@ -58,52 +91,73 @@ function getCurrentManilaDateTime(): string {
 }
 
 /**
- * Wait until the caller's WebRTC audio track is subscribed in the room
- * (proving ICE/DTLS + Android AudioSession/AEC are established on the device)
- * before triggering Kallie's opening greeting. Prevents initial words from
- * stuttering, cutting off, or being interrupted during client SDP setup.
+ * Waits in standby mode until the caller sends a `start_call` control packet
+ * over the LiveKit data channel, the room disconnects, or the idle TTL expires.
  */
-async function waitForCallerMediaReady(
-  ctx: JobContext,
-  timeoutMs = 2500,
-): Promise<void> {
-  const isAudioKind = (kind: unknown) =>
-    kind === 1 || String(kind).toLowerCase().includes('audio');
-
-  const hasSubscribedRemoteAudio = () =>
-    Array.from(ctx.room.remoteParticipants.values()).some((participant) =>
-      Array.from(participant.trackPublications.values()).some(
-        (pub) => pub.subscribed && isAudioKind(pub.kind),
-      ),
-    );
-
-  if (hasSubscribedRemoteAudio()) {
-    return;
+export function waitForStandbyActivation(
+  room: {
+    isConnected?: boolean;
+    on: (event: string, listener: (...args: any[]) => void) => unknown;
+    off: (event: string, listener: (...args: any[]) => void) => unknown;
+  },
+  timeoutMs = DEFAULT_STANDBY_TIMEOUT_MS,
+): Promise<'activated' | 'timeout' | 'disconnected'> {
+  if (room.isConnected === false) {
+    return Promise.resolve('disconnected');
   }
+  const boundedTimeout = Math.max(
+    MIN_STANDBY_TIMEOUT_MS,
+    Math.min(MAX_STANDBY_TIMEOUT_MS, timeoutMs),
+  );
 
-  await new Promise<void>((resolve) => {
+  return new Promise((resolve) => {
     let settled = false;
-    const finish = () => {
+    const finish = (outcome: 'activated' | 'timeout' | 'disconnected') => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      ctx.room.off('trackSubscribed', onTrackSubscribed);
-      ctx.room.off('disconnected', finish);
-      resolve();
+      room.off('dataReceived', onDataReceived);
+      room.off('disconnected', onDisconnected);
+      resolve(outcome);
     };
-    const onTrackSubscribed = (track: { kind?: unknown }) => {
-      if (isAudioKind(track?.kind)) {
-        finish();
+
+    const onDisconnected = () => finish('disconnected');
+    const onDataReceived = (
+      payload: Uint8Array,
+      _participant?: unknown,
+      _kind?: unknown,
+      topic?: string,
+    ) => {
+      if (topic && topic !== CONTROL_DATA_TOPIC) {
+        return;
+      }
+      try {
+        const text = Buffer.from(payload).toString('utf8').trim();
+        if (text === 'start_call') {
+          finish('activated');
+          return;
+        }
+        const parsed = JSON.parse(text) as { type?: string };
+        if (parsed?.type === 'start_call') {
+          finish('activated');
+        }
+      } catch {
+        // Ignore non-JSON or unrelated packets
       }
     };
-    const timer = setTimeout(finish, timeoutMs);
-    ctx.room.on('trackSubscribed', onTrackSubscribed);
-    ctx.room.on('disconnected', finish);
+
+    const timer = setTimeout(() => finish('timeout'), boundedTimeout);
+    room.on('dataReceived', onDataReceived);
+    room.on('disconnected', onDisconnected);
   });
 }
 
 export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
+  const t0 = performance.now();
+  const msSinceStart = () => Math.round(performance.now() - t0);
   const metadata = parseJobMetadata(ctx.job.metadata);
+  const sessionTag = metadata.sessionId || ctx.room.name || 'unknown';
+  const isStandby = Boolean(metadata.standby);
   const title = metadata.title || 'Call with Kallie';
   const customPrompt =
     metadata.aiPrompt ||
@@ -135,6 +189,7 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
   const selectedModel =
     process.env.GEMINI_REALTIME_MODEL || 'gemini-3.1-flash-live-preview';
   const supportsAffectiveDialog = selectedModel.startsWith('gemini-2.5-');
+  const thinkingConfig = resolveThinkingConfig(selectedModel);
 
   const model = new google.realtime.RealtimeModel({
     model: selectedModel,
@@ -142,13 +197,33 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
     instructions,
     apiKey: process.env.GOOGLE_API_KEY,
     ...(supportsAffectiveDialog ? { enableAffectiveDialog: true } : {}),
+    ...(thinkingConfig ? { thinkingConfig: thinkingConfig as never } : {}),
   });
 
   const session = new voice.AgentSession({
     llm: model,
+    // Gemini Live runs server-side VAD & turn detection; skip unused local models
+    vad: null,
+    turnHandling: {
+      turnDetection: 'realtime_llm',
+    },
   });
 
   const transcript: TranscriptEntry[] = [];
+  let callActivated = !isStandby;
+  let activatedAtMs: number | null = null;
+  let loggedFirstSpeaking = false;
+
+  session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+    if (!loggedFirstSpeaking && event.newState === 'speaking') {
+      loggedFirstSpeaking = true;
+      const fromAct =
+        activatedAtMs !== null ? ` fromActivation=${Math.round(performance.now() - activatedAtMs)}ms` : '';
+      console.log(
+        `[KalliePerf] session=${sessionTag} firstSpeaking=${msSinceStart()}ms${fromAct}`,
+      );
+    }
+  });
 
   session.on(voice.AgentSessionEventTypes.ConversationItemAdded, (event) => {
     const item = event.item;
@@ -177,34 +252,62 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
     if (hangupTimer) {
       clearTimeout(hangupTimer);
     }
-    if (metadata.sessionId) {
+    if (callActivated && metadata.sessionId) {
       await saveCallTranscript(metadata.sessionId, transcript);
     }
   });
 
+  // In standby mode, arm the activation listener BEFORE awaiting connect/start
+  // so a fast tap right after room join is never missed.
+  let standbyPromise: Promise<'activated' | 'timeout' | 'disconnected'> | null = null;
+
   await ctx.connect();
+  const roomConnectedMs = msSinceStart();
+
+  if (isStandby) {
+    standbyPromise = waitForStandbyActivation(
+      ctx.room as unknown as Parameters<typeof waitForStandbyActivation>[0],
+      metadata.standbyTimeoutMs ?? DEFAULT_STANDBY_TIMEOUT_MS,
+    );
+  }
 
   await session.start({
     agent,
     room: ctx.room,
   });
-
-  if (metadata.sessionId) {
-    void markCallInProgress(metadata.sessionId);
-  }
+  const sessionStartedMs = msSinceStart();
 
   if (ctx.room.remoteParticipants.size === 0) {
     await ctx.waitForParticipant();
   }
-
-  // Wait for bidirectional WebRTC audio readiness before greeting so first syllables
-  // play smoothly into an already-settled, echo-cancelled audio stream
-  await waitForCallerMediaReady(ctx, 2500);
+  const participantJoinedMs = msSinceStart();
 
   if (!ctx.room.isConnected) {
     return;
   }
 
+  if (isStandby && standbyPromise) {
+    console.log(
+      `[KalliePerf] session=${sessionTag} standbyReady=${msSinceStart()}ms roomConnected=${roomConnectedMs}ms sessionStarted=${sessionStartedMs}ms participantJoined=${participantJoinedMs}ms thinking=${thinkingConfig?.thinkingLevel ?? 'default'}`,
+    );
+    const outcome = await standbyPromise;
+    if (outcome !== 'activated' || !ctx.room.isConnected) {
+      console.log(
+        `[KalliePerf] session=${sessionTag} standbyClosed=${outcome} elapsed=${msSinceStart()}ms`,
+      );
+      void ctx.room.disconnect();
+      return;
+    }
+    callActivated = true;
+    activatedAtMs = performance.now();
+  }
+
+  if (metadata.sessionId) {
+    void markCallInProgress(metadata.sessionId);
+  }
+
+  // Trigger Gemini's opening greeting immediately so LLM inference runs on the
+  // warm WebSocket (standby) or overlaps with caller mic publish (on-demand).
   const openingInstruction = metadata.isScheduledCallback
     ? `You are calling the user back right now for their scheduled reminder: "${title}" (${customPrompt}). Speak FIRST right now as Kallie (their sweet girlfriend) and deliver this reminder warmly in 1 to 2 short sentences.`
     : `The user just started a voice call with you! Speak FIRST right now as Kallie (their sweet girlfriend) with a warm, natural greeting. Keep it short (1 to 2 sentences) so they can reply.`;
@@ -213,6 +316,11 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
     session.generateReply({
       instructions: openingInstruction,
     });
+    const actDelta =
+      activatedAtMs !== null ? ` fromActivation=${Math.round(performance.now() - activatedAtMs)}ms` : '';
+    console.log(
+      `[KalliePerf] session=${sessionTag} roomConnected=${roomConnectedMs}ms sessionStarted=${sessionStartedMs}ms participantJoined=${participantJoinedMs}ms generateReplySent=${msSinceStart()}ms${actDelta} thinking=${thinkingConfig?.thinkingLevel ?? 'default'}`,
+    );
   } catch (err) {
     console.warn('[KallieAgent] Skipping initial greeting (session already closed):', err);
   }

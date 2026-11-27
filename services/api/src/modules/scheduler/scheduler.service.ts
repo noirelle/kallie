@@ -35,6 +35,8 @@ export class SchedulerService {
   private readonly logger = new Logger(SchedulerService.name);
   private isPolling = false;
   private readonly fallbackSentReminders = new Map<string, number>();
+  private hasPendingRingingCalls = false;
+  private lastExpirySweepAt = 0;
 
   constructor(
     private readonly supabaseAdmin: SupabaseAdminService,
@@ -50,8 +52,18 @@ export class SchedulerService {
 
     try {
       await this.sendDueReminders();
-      await this.triggerDueCalls();
-      await this.expireUnansweredCalls();
+      const triggeredCount = await this.triggerDueCalls();
+      if (triggeredCount > 0) {
+        this.hasPendingRingingCalls = true;
+      }
+
+      // Avoid running an UPDATE scan on call_sessions every 15s during idle periods:
+      // sweep immediately when ringing calls exist, otherwise run a 60s safety sweep.
+      const now = Date.now();
+      if (this.hasPendingRingingCalls || now - this.lastExpirySweepAt >= 60_000) {
+        this.lastExpirySweepAt = now;
+        await this.expireUnansweredCalls();
+      }
     } catch (error) {
       this.logger.error(
         'Scheduler cycle error',
@@ -130,23 +142,24 @@ export class SchedulerService {
     }
   }
 
-  private async triggerDueCalls() {
+  private async triggerDueCalls(): Promise<number> {
     const { data, error } = await this.supabaseAdmin.client.rpc('claim_due_schedules', {
       batch_size: 20,
     });
 
     if (error) {
       this.logger.warn(`claim_due_schedules RPC skipped/failed: ${error.message}`);
-      return;
+      return 0;
     }
 
     const schedules = (data || []) as ClaimedSchedule[];
     if (schedules.length === 0) {
-      return;
+      return 0;
     }
 
     this.logger.log(`Claimed ${schedules.length} due call schedule(s).`);
 
+    let triggered = 0;
     for (const schedule of schedules) {
       const roomName = `kallie-${crypto.randomUUID()}`;
       const { data: session, error: insertError } = await this.supabaseAdmin.client
@@ -169,12 +182,14 @@ export class SchedulerService {
         continue;
       }
 
+      triggered += 1;
       await this.notificationsService.notifyIncomingCall(schedule.user_id, {
         sessionId: session.id,
         roomName: session.room_name,
         title: session.title,
       });
     }
+    return triggered;
   }
 
   private async expireUnansweredCalls() {
@@ -204,6 +219,8 @@ export class SchedulerService {
           }),
         ),
       );
+    } else {
+      this.hasPendingRingingCalls = false;
     }
   }
 }

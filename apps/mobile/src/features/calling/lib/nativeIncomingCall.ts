@@ -6,6 +6,16 @@ export interface IncomingCallIntentEvent {
   title: string;
 }
 
+export interface LocalReminderAlarmItem {
+  scheduleId: string;
+  dedupeKey: string;
+  title: string;
+  scheduledAtIso: string;
+  timezone: string;
+  minutesBefore: number;
+  triggerAtMs: number;
+}
+
 interface NativeKallieIncomingCall {
   ensureChannels: () => void;
   showIncomingCall: (
@@ -19,6 +29,7 @@ interface NativeKallieIncomingCall {
   stopCallForegroundService: () => void;
   getActiveCallSessionId: () => Promise<string | null>;
   showReminderNotification: (scheduleId: string, title: string, body: string) => void;
+  syncLocalReminderAlarms?: (alarmsJson: string) => void;
   consumePendingCallIntent: () => Promise<IncomingCallIntentEvent | null>;
   canUseFullScreenIntent: () => Promise<boolean>;
   openFullScreenIntentSettings: () => Promise<boolean>;
@@ -96,6 +107,15 @@ export const nativeIncomingCall = {
       nativeMod?.showReminderNotification(scheduleId, title, body);
     } catch {
       // Safe no-op
+    }
+  },
+
+  syncLocalReminderAlarms(alarms: LocalReminderAlarmItem[]): void {
+    if (Platform.OS !== 'android') return;
+    try {
+      nativeMod?.syncLocalReminderAlarms?.(JSON.stringify(alarms));
+    } catch {
+      // Safe no-op on older dev builds without alarm receiver
     }
   },
 

@@ -24,6 +24,7 @@ export default function HomeScreen() {
     error,
     messages,
     startImmediateCall,
+    prewarmCallIntent,
     sendMessage,
     toggleMute,
     endActiveCall,
@@ -53,6 +54,7 @@ export default function HomeScreen() {
         chat: true,
       }}
       onStartCall={startImmediateCall}
+      onStartCallPressIn={prewarmCallIntent}
       onSendMessage={sendMessage}
       onToggleMute={toggleMute}
       onEndCall={() => endActiveCall()}

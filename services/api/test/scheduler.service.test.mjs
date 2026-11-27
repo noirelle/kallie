@@ -11,6 +11,9 @@ describe('SchedulerService', () => {
     const supabaseAdmin = {
       client: {
         rpc: async (name) => {
+          if (name === 'claim_due_reminders') {
+            return { data: [], error: null };
+          }
           assert.equal(name, 'claim_due_schedules');
           return {
             data: [
@@ -48,7 +51,9 @@ describe('SchedulerService', () => {
               }
               return {
                 eq: () => ({
-                  lt: async () => ({ error: null }),
+                  lt: () => ({
+                    select: async () => ({ data: [], error: null }),
+                  }),
                 }),
               };
             },
@@ -61,6 +66,8 @@ describe('SchedulerService', () => {
       notifyIncomingCall: async (userId, payload) => {
         notified.push({ userId, payload });
       },
+      notifyCallEnded: async () => {},
+      notifyCallReminder: async () => {},
     };
 
     const scheduler = new SchedulerService(supabaseAdmin, notificationsService);
@@ -73,5 +80,41 @@ describe('SchedulerService', () => {
     assert.equal(notified[0].userId, 'user-1');
     assert.equal(notified[0].payload.sessionId, 'sess-99');
     assert.equal(expiredUpdated, true);
+  });
+
+  it('skips redundant unanswered-call UPDATE sweeps during consecutive idle cycles', async () => {
+    let expirySweeps = 0;
+
+    const supabaseAdmin = {
+      client: {
+        rpc: async () => ({ data: [], error: null }),
+        from: () => ({
+          update: () => {
+            expirySweeps += 1;
+            return {
+              eq: () => ({
+                lt: () => ({
+                  select: async () => ({ data: [], error: null }),
+                }),
+              }),
+            };
+          },
+        }),
+      },
+    };
+
+    const notificationsService = {
+      notifyIncomingCall: async () => {},
+      notifyCallEnded: async () => {},
+      notifyCallReminder: async () => {},
+    };
+
+    const scheduler = new SchedulerService(supabaseAdmin, notificationsService);
+    await scheduler.processDueSchedules();
+    await scheduler.processDueSchedules();
+    await scheduler.processDueSchedules();
+
+    // First cycle sweeps once; subsequent idle cycles within 60s skip the UPDATE scan
+    assert.equal(expirySweeps, 1);
   });
 });

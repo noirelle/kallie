@@ -1,9 +1,32 @@
-import { ConnectionQuality, Room, RoomEvent, Track } from 'livekit-client';
+import {
+  ConnectionQuality,
+  ConnectionState,
+  createLocalAudioTrack,
+  LocalAudioTrack,
+  Room,
+  RoomEvent,
+  Track,
+} from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { AuraConnectionStatus } from '../../../components/auraTheme';
 import { apiClient } from '../../../lib/apiClient';
 import { clearPendingCallConnection } from '../../../lib/callSessionStore';
+import {
+  ensureMicrophonePermission,
+  getCachedRegionalLiveKitUrl,
+  getNativeLiveKit,
+  invalidateCachedRegionalLiveKitUrl,
+  registerLiveKitGlobals,
+  resolveOptimalLiveKitUrl,
+  sendStandbyStartSignal,
+  StagedStandbySession,
+  stopAudioSessionSafe,
+  takePrewarmedRoom,
+  warmAudioSessionEarly,
+} from '../lib/callPrewarm';
+
+export { registerLiveKitGlobals };
 
 export type CallConnectionState =
   | 'connecting'
@@ -37,72 +60,13 @@ export interface CallChatMessage {
   isFinal?: boolean;
 }
 
-type LiveKitNativeModule = {
-  registerGlobals: () => void;
-  AndroidAudioTypePresets?: {
-    communication: Record<string, unknown>;
-  };
-  AudioSession: {
-    startAudioSession: () => Promise<void>;
-    stopAudioSession: () => Promise<void>;
-    configureAudio?: (options: Record<string, unknown>) => Promise<void>;
-    selectAudioOutput?: (output: string) => Promise<void>;
-  };
-};
-
-let nativeGlobalsRegistered = false;
-
-export function registerLiveKitGlobals(): void {
-  if (Platform.OS === 'web' || nativeGlobalsRegistered) {
-    return;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('@livekit/react-native') as LiveKitNativeModule;
-    mod.registerGlobals();
-    nativeGlobalsRegistered = true;
-  } catch {
-    // Safe fallback on web or Expo Go
-  }
-}
-
-function getNativeLiveKit(): LiveKitNativeModule | null {
-  if (Platform.OS === 'web') return null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('@livekit/react-native') as LiveKitNativeModule;
-  } catch {
-    return null;
-  }
-}
-
-async function ensureMicrophonePermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') {
-    return true;
-  }
-  const alreadyGranted = await PermissionsAndroid.check(
-    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-  );
-  if (alreadyGranted) {
-    return true;
-  }
-  const result = await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-    {
-      title: 'Microphone Permission',
-      message: 'Kallie needs microphone access so you can talk during voice calls.',
-      buttonPositive: 'Allow',
-      buttonNegative: 'Cancel',
-    },
-  );
-  return result === PermissionsAndroid.RESULTS.GRANTED;
-}
-
 export function useLiveKitCall(params: {
   sessionId: string;
   livekitUrl: string;
   token: string;
   enabled?: boolean;
+  callStartedAtMs?: number;
+  preconnectedStandby?: StagedStandbySession | null;
   onRemoteEnded?: () => void;
 }) {
   const isEnabled = params.enabled !== false;
@@ -194,6 +158,10 @@ export function useLiveKitCall(params: {
   const audioElementsRef = useRef<HTMLMediaElement[]>([]);
   const wasConnectedRef = useRef(false);
   const endedManuallyRef = useRef(false);
+  const callStartedAtMsRef = useRef(params.callStartedAtMs);
+  callStartedAtMsRef.current = params.callStartedAtMs;
+  const preconnectedStandbyRef = useRef(params.preconnectedStandby ?? null);
+  preconnectedStandbyRef.current = params.preconnectedStandby ?? null;
   const onRemoteEndedRef = useRef(params.onRemoteEnded);
   onRemoteEndedRef.current = params.onRemoteEnded;
 
@@ -238,6 +206,12 @@ export function useLiveKitCall(params: {
     }
 
     let cancelled = false;
+    let preCapturedMicTrack: LocalAudioTrack | null = null;
+    let loggedFirstSpeaking = false;
+    let loggedTrackSubscribed = false;
+    const perfOrigin = callStartedAtMsRef.current ?? Date.now();
+    const elapsedMs = () => Date.now() - perfOrigin;
+
     wasConnectedRef.current = false;
     endedManuallyRef.current = false;
     finalizedSegmentsRef.current.clear();
@@ -247,18 +221,13 @@ export function useLiveKitCall(params: {
     setConnectionStatus('connecting');
     setError(null);
 
-    registerLiveKitGlobals();
-    const nativeLk = getNativeLiveKit();
+    const adoptedStandby =
+      preconnectedStandbyRef.current &&
+      preconnectedStandbyRef.current.joinData.session.id === params.sessionId
+        ? preconnectedStandbyRef.current
+        : null;
 
-    const room = new Room({
-      adaptiveStream: true,
-      dynacast: true,
-      audioCaptureDefaults: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    const room = adoptedStandby ? adoptedStandby.room : takePrewarmedRoom();
     roomRef.current = room;
 
     const markConnectedIfStable = () => {
@@ -276,6 +245,12 @@ export function useLiveKitCall(params: {
           markConnectedIfStable();
         }
         if (parsed === 'speaking') {
+          if (!loggedFirstSpeaking) {
+            loggedFirstSpeaking = true;
+            console.log(
+              `[CallPerf] firstAgentSpeaking(attr)=${elapsedMs()}ms session=${params.sessionId}`,
+            );
+          }
           setStatus('agent_speaking');
         } else if (wasConnectedRef.current) {
           setStatus('connected');
@@ -285,6 +260,9 @@ export function useLiveKitCall(params: {
 
     room.on(RoomEvent.ParticipantConnected, (participant) => {
       if (!cancelled) {
+        console.log(
+          `[CallPerf] agentJoined=${elapsedMs()}ms identity=${participant.identity} session=${params.sessionId}`,
+        );
         setAgentJoined(true);
         syncAgentAttrState(participant.attributes);
       }
@@ -301,6 +279,12 @@ export function useLiveKitCall(params: {
         (speaker) => speaker.identity !== room.localParticipant.identity,
       );
       if (remoteSpeaker) {
+        if (!loggedFirstSpeaking) {
+          loggedFirstSpeaking = true;
+          console.log(
+            `[CallPerf] firstAgentSpeaking(audio)=${elapsedMs()}ms session=${params.sessionId}`,
+          );
+        }
         setAgentReady(true);
         markConnectedIfStable();
         setStatus('agent_speaking');
@@ -323,6 +307,12 @@ export function useLiveKitCall(params: {
       if (!cancelled) {
         setAgentJoined(true);
         if (track.kind === Track.Kind.Audio) {
+          if (!loggedTrackSubscribed) {
+            loggedTrackSubscribed = true;
+            console.log(
+              `[CallPerf] agentAudioSubscribed=${elapsedMs()}ms session=${params.sessionId}`,
+            );
+          }
           setAgentReady(true);
           markConnectedIfStable();
         }
@@ -438,35 +428,84 @@ export function useLiveKitCall(params: {
           throw new Error('Microphone permission is required for voice calls.');
         }
 
-        if (nativeLk) {
-          const commPreset = nativeLk.AndroidAudioTypePresets?.communication || {
-            manageAudioFocus: true,
-            audioMode: 'inCommunication',
-            audioFocusMode: 'gain',
-            audioAttributesUsageType: 'voiceCommunication',
-            audioAttributesContentType: 'speech',
-            audioStreamType: 'voiceCall',
-          };
-
-          await nativeLk.AudioSession.configureAudio?.({
-            android: {
-              preferredOutputList: ['bluetooth', 'headset', 'speaker', 'earpiece'],
-              audioTypeOptions: commPreset,
-            },
-            ios: {
-              defaultOutput: 'speaker',
-            },
-          });
-          await nativeLk.AudioSession.startAudioSession();
-          // Lock speaker route upfront before media starts so Android AudioManager
-          // does not switch output devices mid-greeting (which causes initial audio glitches)
-          await nativeLk.AudioSession.selectAudioOutput?.('speaker').catch(() => {});
+        // Fast-path activation if we adopted a pre-connected standby room:
+        // reuse the imperative t=0ms `start_call` promise if already sent on tap,
+        // otherwise send `start_call` immediately so Gemini speaks on its warm WS.
+        let connectedViaStandby = false;
+        if (adoptedStandby) {
+          if (adoptedStandby.startSignalSent && adoptedStandby.startSignalPromise) {
+            const ok = await adoptedStandby.startSignalPromise;
+            if (ok && room.state === ConnectionState.Connected) {
+              connectedViaStandby = true;
+            }
+          } else {
+            const ok =
+              adoptedStandby.isConnected() || (await adoptedStandby.connectPromise);
+            if (ok && room.state === ConnectionState.Connected) {
+              connectedViaStandby = true;
+              await sendStandbyStartSignal(room);
+              console.log(
+                `[CallPerf] standbyActivated=${elapsedMs()}ms session=${params.sessionId}`,
+              );
+            }
+          }
         }
 
-        await room.connect(params.livekitUrl, params.token, {
-          autoSubscribe: true,
-        });
+        // Await AudioSession (started at t=0ms on Aura tap)
+        await warmAudioSessionEarly();
+        console.log(`[CallPerf] audioReady=${elapsedMs()}ms session=${params.sessionId}`);
+
+        // Reuse imperative t=0ms mic capture if available, else capture in parallel with room.connect()
+        const micCapturePromise = (
+          adoptedStandby?.preCapturedMicPromise ||
+          createLocalAudioTrack({
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          })
+        )
+          .then((track) => {
+            if (!track) return null;
+            if (cancelled) {
+              track.stop();
+              return null;
+            }
+            preCapturedMicTrack = track;
+            return track;
+          })
+          .catch(() => null);
+
+        if (!connectedViaStandby) {
+          const targetUrl =
+            getCachedRegionalLiveKitUrl(params.livekitUrl) !== params.livekitUrl
+              ? getCachedRegionalLiveKitUrl(params.livekitUrl)
+              : await resolveOptimalLiveKitUrl(params.livekitUrl, params.token);
+
+          try {
+            await room.connect(targetUrl, params.token, {
+              autoSubscribe: true,
+            });
+          } catch (connectErr) {
+            if (targetUrl !== params.livekitUrl && !cancelled) {
+              invalidateCachedRegionalLiveKitUrl();
+              await room.connect(params.livekitUrl, params.token, {
+                autoSubscribe: true,
+              });
+            } else {
+              throw connectErr;
+            }
+          }
+          // If the adopted standby session reconnected onto a standby-flagged room,
+          // still deliver start_call so the agent activates cleanly.
+          if (adoptedStandby && !cancelled) {
+            await sendStandbyStartSignal(room).catch(() => {});
+          }
+        }
+
+        console.log(`[CallPerf] roomConnected=${elapsedMs()}ms session=${params.sessionId}`);
         if (cancelled) {
+          const track = await micCapturePromise;
+          track?.stop();
           await room.disconnect();
           return;
         }
@@ -476,11 +515,50 @@ export function useLiveKitCall(params: {
         if (Platform.OS === 'web') {
           await room.startAudio().catch(() => {});
         }
-        await room.localParticipant.setMicrophoneEnabled(true, {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        });
+
+        // On on-demand fallback calls, if the remote agent is already in the room
+        // and actively publishing its audio track, wait briefly (<=300ms) for
+        // TrackSubscribed before publishing mic to avoid single-PC SDP renegotiation glare.
+        const hasRemoteAudioAlready = Array.from(room.remoteParticipants.values()).some((p) =>
+          Array.from(p.audioTrackPublications.values()).some((pub) => pub.isSubscribed),
+        );
+        if (!connectedViaStandby && room.remoteParticipants.size > 0 && !hasRemoteAudioAlready) {
+          await new Promise<void>((resolve) => {
+            const onSub = (track: { kind: Track.Kind }) => {
+              if (track.kind === Track.Kind.Audio) {
+                clearTimeout(timer);
+                room.off(RoomEvent.TrackSubscribed, onSub);
+                resolve();
+              }
+            };
+            const timer = setTimeout(() => {
+              room.off(RoomEvent.TrackSubscribed, onSub);
+              resolve();
+            }, 300);
+            room.on(RoomEvent.TrackSubscribed, onSub);
+          });
+        }
+
+        const capturedTrack = await micCapturePromise;
+        if (cancelled) {
+          capturedTrack?.stop();
+          await room.disconnect();
+          return;
+        }
+
+        if (capturedTrack) {
+          preCapturedMicTrack = null;
+          await room.localParticipant.publishTrack(capturedTrack, {
+            source: Track.Source.Microphone,
+          });
+        } else {
+          await room.localParticipant.setMicrophoneEnabled(true, {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          });
+        }
+        console.log(`[CallPerf] micPublished=${elapsedMs()}ms session=${params.sessionId}`);
 
         if (!cancelled) {
           const hasRemote = room.remoteParticipants.size > 0;
@@ -512,6 +590,10 @@ export function useLiveKitCall(params: {
 
     return () => {
       cancelled = true;
+      if (preCapturedMicTrack) {
+        preCapturedMicTrack.stop();
+        preCapturedMicTrack = null;
+      }
       try {
         room.removeAllListeners();
         room.unregisterTextStreamHandler('lk.transcription');
@@ -526,9 +608,7 @@ export function useLiveKitCall(params: {
       // exit transition so the UI thread stays locked at 60fps with zero freeze.
       setTimeout(() => {
         void room.disconnect().catch(() => {});
-        if (nativeLk) {
-          void nativeLk.AudioSession.stopAudioSession().catch(() => {});
-        }
+        void stopAudioSessionSafe();
       }, 300);
     };
   }, [isEnabled, params.livekitUrl, params.sessionId, params.token, upsertMessage]);

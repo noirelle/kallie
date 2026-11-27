@@ -4,6 +4,7 @@ import {
   SupabaseAuthGuard,
 } from '../../common/guards/supabaseAuth.guard';
 import { CallsService } from './calls.service';
+import { ActivateStandbyCallDto } from './dto/activateStandbyCall.dto';
 import { CreateTestCallDto } from './dto/createTestCall.dto';
 import { DeclinePushDto } from './dto/declinePush.dto';
 
@@ -15,6 +16,15 @@ export class CallsController {
   @Post('test')
   createTestCall(@Req() req: AuthenticatedRequest, @Body() dto: CreateTestCallDto) {
     return this.callsService.createImmediateTestCall(req.user.id, req.user.email, dto);
+  }
+
+  @UseGuards(SupabaseAuthGuard)
+  @Post('standby/activate')
+  activateStandbyCall(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ActivateStandbyCallDto,
+  ) {
+    return this.callsService.activateStandbyCall(req.user.id, dto);
   }
 
   @UseGuards(SupabaseAuthGuard)

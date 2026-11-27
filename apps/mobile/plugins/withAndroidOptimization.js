@@ -10,7 +10,7 @@ const {
  * Optimizes Android release APK size (~125.6 MB -> ~14-18 MB):
  * 1. Restricts native ABIs to arm64-v8a (override via EXPO_ANDROID_ARCHS) — drops ~83 MB of x86/x86_64/armeabi-v7a.
  * 2. Sets expo.useLegacyPackaging=true to DEFLATE-compress native .so libraries (~60% smaller, Android 15+ 16 KB safe).
- * 3. Sets android.enableBundleCompression=true to compress index.android.bundle (~3 MB saved).
+ * 3. Sets android.enableBundleCompression=false so Hermes can mmap index.android.bundle directly from APK (faster cold boot, lower RAM).
  * 4. Disables unused Fresco GIF/WebP native decoders (saves libgifimage.so + libstatic-webp.so + DEX).
  * 5. Enables R8 minification, resource shrinking, PNG crunching, and English-only resourceConfigurations.
  * 6. Keeps ProGuard rules for LiveKit WebRTC & CallKeep JNI/reflection classes.
@@ -31,7 +31,7 @@ function withAndroidOptimization(config) {
 
     upsert('reactNativeArchitectures', archs);
     upsert('expo.useLegacyPackaging', 'true');
-    upsert('android.enableBundleCompression', 'true');
+    upsert('android.enableBundleCompression', 'false');
     upsert('expo.gif.enabled', 'false');
     upsert('expo.webp.enabled', 'false');
     upsert('expo.webp.animated', 'false');

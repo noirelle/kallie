@@ -3,6 +3,7 @@ import { Platform, Vibration } from 'react-native';
 import { apiClient } from '../../../lib/apiClient';
 import { supabase } from '../../../lib/supabaseClient';
 import { CallSession, JoinCallResponse } from '../../../types/database';
+import { subscribeCallSessionEvents } from '../../schedules/lib/syncEngine';
 import {
   IncomingCallIntentEvent,
   nativeIncomingCall,
@@ -304,52 +305,29 @@ export function useIncomingCall(
     };
   }, [handleNativeIntent, userId]);
 
-  // Supabase Realtime subscription for live foreground incoming calls & remote cancellations
+  // Share the single unified Supabase Realtime channel started by syncEngine
   useEffect(() => {
     if (!userId) {
       setIncomingSession(null);
       return;
     }
 
-    const channel = supabase
-      .channel(`incoming-calls-${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'call_sessions',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          const next = payload.new as CallSession;
-          if (next.status === 'ringing') {
-            presentIncomingSession(next);
-          }
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'call_sessions',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          const updated = payload.new as CallSession;
-          if (updated.status !== 'ringing') {
-            dismissSession(updated.id);
-          } else if (incomingSessionIdRef.current === updated.id) {
-            setIncomingSession(updated);
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeCallSessionEvents((eventType, session) => {
+      if (session.user_id && session.user_id !== userId) {
+        return;
+      }
+      if (eventType === 'INSERT') {
+        if (session.status === 'ringing') {
+          presentIncomingSession(session);
+        }
+        return;
+      }
+      if (session.status !== 'ringing') {
+        dismissSession(session.id);
+      } else if (incomingSessionIdRef.current === session.id) {
+        setIncomingSession(session);
+      }
+    });
   }, [dismissSession, presentIncomingSession, userId]);
 
   const acceptIncomingCall = useCallback(async (): Promise<JoinCallResponse | null> => {

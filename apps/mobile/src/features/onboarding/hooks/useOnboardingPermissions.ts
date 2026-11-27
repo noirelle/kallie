@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, PermissionsAndroid, Platform } from 'react-native';
+import { getPreferenceSync, setPreferenceSync } from '../../../lib/storage/localDb';
 import { nativeIncomingCall } from '../../calling/lib/nativeIncomingCall';
 
 const ONBOARDING_STORAGE_KEY = 'kallie_onboarding_v2';
@@ -55,10 +56,20 @@ async function checkAndroidFullScreenIntentPermission(): Promise<boolean> {
 }
 
 export function useOnboardingPermissions() {
-  const [hydrated, setHydrated] = useState(false);
-  const [completed, setCompleted] = useState(false);
-  const [discoverySource, setDiscoverySource] = useState<string | null>(null);
-  const [interests, setInterests] = useState<string[]>([]);
+  const initialSavedRef = useRef<Partial<OnboardingSavedData> | null | undefined>(undefined);
+  if (initialSavedRef.current === undefined) {
+    initialSavedRef.current = getPreferenceSync<Partial<OnboardingSavedData>>(ONBOARDING_STORAGE_KEY);
+  }
+  const initialSaved = initialSavedRef.current;
+
+  const [hydrated, setHydrated] = useState(Boolean(initialSaved));
+  const [completed, setCompleted] = useState(Boolean(initialSaved?.completed));
+  const [discoverySource, setDiscoverySource] = useState<string | null>(
+    initialSaved?.discoverySource ?? null,
+  );
+  const [interests, setInterests] = useState<string[]>(
+    Array.isArray(initialSaved?.interests) ? initialSaved.interests : [],
+  );
   const [permissions, setPermissions] = useState<PermissionStates>({
     notifications: false,
     microphone: false,
@@ -79,17 +90,28 @@ export function useOnboardingPermissions() {
     let active = true;
     const init = async () => {
       try {
-        const raw = await AsyncStorage.getItem(ONBOARDING_STORAGE_KEY);
-        if (active && raw) {
-          const parsed = JSON.parse(raw) as Partial<OnboardingSavedData>;
-          setCompleted(Boolean(parsed.completed));
-          setDiscoverySource(parsed.discoverySource ?? null);
-          setInterests(Array.isArray(parsed.interests) ? parsed.interests : []);
+        let isCompleted = Boolean(initialSaved?.completed);
+        if (!initialSaved) {
+          // One-time migration from legacy AsyncStorage to SQLite preferences
+          const raw = await AsyncStorage.getItem(ONBOARDING_STORAGE_KEY);
+          if (active && raw) {
+            const parsed = JSON.parse(raw) as Partial<OnboardingSavedData>;
+            setPreferenceSync(ONBOARDING_STORAGE_KEY, parsed);
+            isCompleted = Boolean(parsed.completed);
+            setCompleted(isCompleted);
+            setDiscoverySource(parsed.discoverySource ?? null);
+            setInterests(Array.isArray(parsed.interests) ? parsed.interests : []);
+          }
         }
-        await refreshPermissions();
+        // Unblock boot overlay immediately once onboarding status is known;
+        // only query native OS permission states when the onboarding wizard is shown.
+        if (active) {
+          setHydrated(true);
+        }
+        if (!isCompleted && active) {
+          await refreshPermissions();
+        }
       } catch {
-        // Ignore storage read errors
-      } finally {
         if (active) {
           setHydrated(true);
         }
@@ -97,17 +119,26 @@ export function useOnboardingPermissions() {
     };
     void init();
 
+    return () => {
+      active = false;
+    };
+  }, [initialSaved, refreshPermissions]);
+
+  // Only refresh OS permission toggles on foreground resume while onboarding is active
+  useEffect(() => {
+    if (!hydrated || completed) {
+      return;
+    }
+    void refreshPermissions();
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         void refreshPermissions();
       }
     });
-
     return () => {
-      active = false;
       appStateSub.remove();
     };
-  }, [refreshPermissions]);
+  }, [completed, hydrated, refreshPermissions]);
 
   const toggleNotifications = useCallback(async () => {
     if (busyKey) return;
@@ -188,7 +219,8 @@ export function useOnboardingPermissions() {
         discoverySource: overrides?.discoverySource ?? discoverySource,
         interests: overrides?.interests ?? interests,
       };
-      await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(payload));
+      setPreferenceSync(ONBOARDING_STORAGE_KEY, payload);
+      await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(payload)).catch(() => {});
       setCompleted(true);
     },
     [discoverySource, interests],

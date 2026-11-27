@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreateTestCallDto {
   @IsOptional()
@@ -15,4 +15,8 @@ export class CreateTestCallDto {
   @IsString()
   @MaxLength(40)
   voice?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  standby?: boolean;
 }

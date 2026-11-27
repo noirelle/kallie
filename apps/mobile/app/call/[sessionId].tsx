@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useActiveCall } from '../../src/features/calling/context/ActiveCallContext';
+import { useActiveCallActions } from '../../src/features/calling/context/ActiveCallContext';
 
 /**
  * Deep-link / legacy call route passthrough.
@@ -11,7 +11,7 @@ import { useActiveCall } from '../../src/features/calling/context/ActiveCallCont
 export default function ActiveCallScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const router = useRouter();
-  const { joinSessionById } = useActiveCall();
+  const { joinSessionById } = useActiveCallActions();
 
   useEffect(() => {
     if (sessionId) {

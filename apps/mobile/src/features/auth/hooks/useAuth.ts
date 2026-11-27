@@ -1,39 +1,39 @@
 import { Session, User } from '@supabase/supabase-js';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { cacheManager } from '../../../lib/cache/cacheManager';
+import {
+  clearCachedAuthSession,
+  getCachedAuthState,
+  subscribeAuthSession,
+} from '../../../lib/storage/authSessionCache';
+import { purgeUserScopedDataSync } from '../../../lib/storage/localDb';
 import { supabase } from '../../../lib/supabaseClient';
+import { nativeIncomingCall } from '../../calling/lib/nativeIncomingCall';
 
 export function useAuth() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const initial = getCachedAuthState();
+  const [session, setSession] = useState<Session | null>(initial.session);
+  const [loading, setLoading] = useState(!initial.hydrated);
 
   useEffect(() => {
-    let active = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (active) {
-        setSession(data.session ?? null);
+    return subscribeAuthSession((nextSession, hydrated) => {
+      setSession(nextSession);
+      if (hydrated) {
         setLoading(false);
       }
     });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (active) {
-        setSession(nextSession ?? null);
-        setLoading(false);
-      }
-    });
-
-    return () => {
-      active = false;
-      listener.subscription.unsubscribe();
-    };
   }, []);
 
   const user: User | null = session?.user ?? null;
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
+    const prevUserId = session?.user?.id;
+    purgeUserScopedDataSync(prevUserId);
+    cacheManager.clearMemory();
+    clearCachedAuthSession();
+    nativeIncomingCall.syncLocalReminderAlarms([]);
     await supabase.auth.signOut();
-  };
+  }, [session?.user?.id]);
 
   return { session, user, loading, signOut };
 }

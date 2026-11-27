@@ -6,10 +6,12 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 export class SupabaseAdminService {
   private readonly logger = new Logger(SupabaseAdminService.name);
   public readonly client: SupabaseClient;
+  public readonly supabaseUrl: string;
 
   constructor(private readonly configService: ConfigService) {
-    const url = this.configService.get<string>('SUPABASE_URL');
+    const url = (this.configService.get<string>('SUPABASE_URL') || '').replace(/\/$/, '');
     const serviceRoleKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+    this.supabaseUrl = url;
 
     if (!url || !serviceRoleKey) {
       this.logger.warn(

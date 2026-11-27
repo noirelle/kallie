@@ -8,25 +8,52 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { AppState } from 'react-native';
 import { AuraConnectionStatus } from '../../../components/auraTheme';
 import { apiClient } from '../../../lib/apiClient';
+import { scheduleAfterPaint } from '../../../lib/scheduleAfterPaint';
 import {
   clearPendingCallConnection,
   getPendingCallConnection,
   setPendingCallConnection,
 } from '../../../lib/callSessionStore';
+import {
+  getCachedAuthState,
+  subscribeAuthSession,
+} from '../../../lib/storage/authSessionCache';
 import { JoinCallResponse } from '../../../types/database';
+import { syncUserData } from '../../schedules/lib/syncEngine';
 import {
   AgentVisualizerState,
   CallChatMessage,
   CallConnectionState,
   useLiveKitCall,
 } from '../hooks/useLiveKitCall';
+import {
+  activateStandbyImperatively,
+  consumeStandbySession,
+  ensureMicrophonePermission,
+  prewarmCallInfrastructure,
+  prewarmOnTouchIntent,
+  StagedStandbySession,
+  stageStandbySession,
+  stopAudioSessionSafe,
+  teardownStandbySession,
+  warmAudioSessionEarly,
+} from '../lib/callPrewarm';
 import { nativeIncomingCall } from '../lib/nativeIncomingCall';
 
-interface ActiveCallContextValue {
+interface ActiveCallActionsValue {
   sessionActive: boolean;
   activeSessionId: string | null;
+  startImmediateCall: () => Promise<void>;
+  prewarmCallIntent: () => void;
+  joinAcceptedCall: (joinData: JoinCallResponse) => void;
+  joinSessionById: (sessionId: string) => Promise<JoinCallResponse | null>;
+  endActiveCall: (expectedSessionId?: string) => void;
+}
+
+interface ActiveCallContextValue extends ActiveCallActionsValue {
   connection: JoinCallResponse | null;
   status: CallConnectionState;
   agentState: AgentVisualizerState;
@@ -39,28 +66,80 @@ interface ActiveCallContextValue {
   audioLevel: number;
   elapsedSeconds: number;
   messages: CallChatMessage[];
-  startImmediateCall: () => Promise<void>;
-  joinAcceptedCall: (joinData: JoinCallResponse) => void;
-  joinSessionById: (sessionId: string) => Promise<JoinCallResponse | null>;
   toggleMute: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   toggleScreenShare: () => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
-  endActiveCall: (expectedSessionId?: string) => void;
 }
 
+const ActiveCallActionsContext = createContext<ActiveCallActionsValue | null>(null);
 const ActiveCallContext = createContext<ActiveCallContextValue | null>(null);
 
 export function ActiveCallProvider({ children }: { children: ReactNode }) {
   const [sessionActive, setSessionActive] = useState(false);
   const [connection, setConnection] = useState<JoinCallResponse | null>(null);
+  const [activeStandby, setActiveStandby] = useState<StagedStandbySession | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [callStartedAtMs, setCallStartedAtMs] = useState<number | null>(null);
+  const initialAuth = getCachedAuthState();
+  const [signedInUserId, setSignedInUserId] = useState<string | null>(
+    initialAuth.session?.user?.id ?? null,
+  );
+  const signedIn = Boolean(signedInUserId);
 
   const attemptIdRef = useRef(0);
   const activeSessionIdRef = useRef<string | null>(null);
   const inFlightAcceptSessionRef = useRef<string | null>(null);
+  const sessionActiveRef = useRef(false);
+  const signedInUserIdRef = useRef<string | null>(signedInUserId);
 
   activeSessionIdRef.current = connection?.session.id ?? null;
+  sessionActiveRef.current = sessionActive;
+  signedInUserIdRef.current = signedInUserId;
+
+  // Share the single authSessionCache listener so standby pre-staging only runs when signed in
+  useEffect(() => {
+    return subscribeAuthSession((nextSession) => {
+      const nextUid = nextSession?.user?.id ?? null;
+      setSignedInUserId(nextUid);
+      if (!nextUid) {
+        void teardownStandbySession();
+      }
+    });
+  }, []);
+
+  // Pre-warm DNS/TLS keep-alive and stage a short-lived standby room on Home screen
+  // mount & foreground resume — deferred past initial frame paint so cold boot stays instant.
+  useEffect(() => {
+    let stageTimer: ReturnType<typeof setTimeout> | null = null;
+    const cancelDeferred = scheduleAfterPaint(() => {
+      prewarmCallInfrastructure(true);
+      if (signedIn && !sessionActive && AppState.currentState === 'active') {
+        stageTimer = setTimeout(() => {
+          if (!sessionActiveRef.current && AppState.currentState === 'active') {
+            void stageStandbySession();
+          }
+        }, 500);
+      }
+    });
+
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        prewarmCallInfrastructure(false);
+        if (signedIn && !sessionActiveRef.current) {
+          void stageStandbySession();
+        }
+      } else if (!sessionActiveRef.current) {
+        // Release idle standby room immediately when app leaves foreground
+        void teardownStandbySession();
+      }
+    });
+    return () => {
+      cancelDeferred();
+      if (stageTimer) clearTimeout(stageTimer);
+      sub.remove();
+    };
+  }, [sessionActive, signedIn]);
 
   const handleRemoteEnded = useCallback(() => {
     attemptIdRef.current += 1;
@@ -71,6 +150,14 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
     nativeIncomingCall.stopCallForegroundService();
     setSessionActive(false);
     setConnection(null);
+    setActiveStandby(null);
+    setCallStartedAtMs(null);
+    // Sync schedules & history immediately after call end in case Kallie scheduled a callback by voice
+    const uid = signedInUserIdRef.current;
+    if (uid) {
+      setTimeout(() => void syncUserData(uid, { force: true }), 1200);
+    }
+    setTimeout(() => prewarmCallInfrastructure(true), 600);
   }, []);
 
   const livekit = useLiveKitCall({
@@ -78,6 +165,8 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
     livekitUrl: connection?.livekitUrl ?? '',
     token: connection?.token ?? '',
     enabled: sessionActive,
+    callStartedAtMs: callStartedAtMs ?? undefined,
+    preconnectedStandby: activeStandby,
     onRemoteEnded: handleRemoteEnded,
   });
 
@@ -101,16 +190,59 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
   const startImmediateCall = useCallback(async () => {
     if (sessionActive) return;
     const attemptId = ++attemptIdRef.current;
+    const startedAt = Date.now();
     setStartError(null);
+    setCallStartedAtMs(startedAt);
     // Enter active session immediately for 0ms perceived latency
     setSessionActive(true);
+
+    // Overlap local mic permission check & native AudioSession setup at t=0ms
+    void ensureMicrophonePermission()
+      .then((granted) => {
+        if (granted && attemptIdRef.current === attemptId) {
+          return warmAudioSessionEarly();
+        }
+      })
+      .catch(() => {});
+
+    // Fast path: adopt already-connected (or in-flight) Home-screen standby session
+    // and trigger `start_call` + mic capture IMPERATIVELY at t=0ms before React renders.
+    const staged = consumeStandbySession();
+    if (staged) {
+      activateStandbyImperatively(staged, startedAt);
+      nativeIncomingCall.startCallForegroundService(
+        staged.joinData.session.id,
+        staged.joinData.session.title || 'Kallie',
+      );
+      console.log(
+        `[CallPerf] standbyHit connected=${staged.isConnected()} audioReady=${staged.isAgentAudioSubscribed()} session=${staged.joinData.session.id}`,
+      );
+      setActiveStandby(staged);
+      setPendingCallConnection(staged.joinData);
+      setConnection(staged.joinData);
+      void apiClient
+        .activateStandbyCall({
+          sessionId: staged.joinData.session.id,
+          roomName: staged.joinData.roomName,
+          title: staged.joinData.session.title,
+          aiPrompt: staged.joinData.session.ai_prompt,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    setActiveStandby(null);
     setConnection(null);
 
     try {
       const joinData = await apiClient.createTestCall({
         title: 'Call with Kallie',
       });
+      console.log(
+        `[CallPerf] apiCreateTestCall=${Date.now() - startedAt}ms session=${joinData.session.id}`,
+      );
       if (attemptIdRef.current !== attemptId) {
+        void stopAudioSessionSafe();
         void apiClient.endCall(joinData.session.id).catch(() => {});
         return;
       }
@@ -119,8 +251,11 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       if (attemptIdRef.current !== attemptId) return;
       nativeIncomingCall.stopCallForegroundService();
+      void stopAudioSessionSafe();
       setSessionActive(false);
       setConnection(null);
+      setActiveStandby(null);
+      setCallStartedAtMs(null);
       setStartError(err instanceof Error ? err.message : 'Unable to connect');
     }
   }, [sessionActive]);
@@ -132,14 +267,22 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    void teardownStandbySession();
     attemptIdRef.current += 1;
     setStartError(null);
+    setActiveStandby(null);
+    setCallStartedAtMs((prev) => prev ?? Date.now());
     setPendingCallConnection(joinData);
     nativeIncomingCall.dismissIncomingCall(targetId);
     nativeIncomingCall.startCallForegroundService(
       targetId,
       joinData.session.title || 'Kallie',
     );
+    void ensureMicrophonePermission()
+      .then((granted) => {
+        if (granted) return warmAudioSessionEarly();
+      })
+      .catch(() => {});
     setConnection(joinData);
     setSessionActive(true);
   }, [sessionActive]);
@@ -162,16 +305,33 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
         return cached;
       }
 
+      void teardownStandbySession();
       const attemptId = ++attemptIdRef.current;
+      const startedAt = Date.now();
       inFlightAcceptSessionRef.current = sessionId;
       setStartError(null);
+      setActiveStandby(null);
+      setCallStartedAtMs(startedAt);
       nativeIncomingCall.dismissIncomingCall(sessionId);
       setSessionActive(true);
       setConnection(null);
 
+      // Warm AudioSession in parallel with POST /calls/:id/accept
+      void ensureMicrophonePermission()
+        .then((granted) => {
+          if (granted && attemptIdRef.current === attemptId) {
+            return warmAudioSessionEarly();
+          }
+        })
+        .catch(() => {});
+
       try {
         const joinData = await apiClient.acceptCall(sessionId);
+        console.log(
+          `[CallPerf] apiAcceptCall=${Date.now() - startedAt}ms session=${joinData.session.id}`,
+        );
         if (attemptIdRef.current !== attemptId) {
+          void stopAudioSessionSafe();
           void apiClient.endCall(joinData.session.id).catch(() => {});
           return null;
         }
@@ -185,8 +345,11 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         if (attemptIdRef.current !== attemptId) return null;
         nativeIncomingCall.stopCallForegroundService();
+        void stopAudioSessionSafe();
         setSessionActive(false);
         setConnection(null);
+        setActiveStandby(null);
+        setCallStartedAtMs(null);
         setStartError(err instanceof Error ? err.message : 'Unable to connect');
         return null;
       } finally {
@@ -197,6 +360,14 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
     },
     [connection, joinAcceptedCall, sessionActive],
   );
+
+  const prewarmCallIntent = useCallback(() => {
+    if (!sessionActiveRef.current) {
+      prewarmOnTouchIntent();
+    }
+  }, []);
+
+  const livekitEndCall = livekit.endCall;
 
   const endActiveCall = useCallback(
     (expectedSessionId?: string) => {
@@ -217,17 +388,50 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
         nativeIncomingCall.dismissIncomingCall(currentId);
         clearPendingCallConnection(currentId);
       }
+      // If user cancelled before LiveKit connection existed, ensure early AudioSession stops
+      if (!activeSessionIdRef.current) {
+        void stopAudioSessionSafe();
+      }
       setSessionActive(false);
       setConnection(null);
-      void livekit.endCall();
+      setActiveStandby(null);
+      setCallStartedAtMs(null);
+      void livekitEndCall();
+      const uid = signedInUserIdRef.current;
+      if (uid) {
+        setTimeout(() => void syncUserData(uid, { force: true }), 1200);
+      }
+      setTimeout(() => prewarmCallInfrastructure(true), 600);
     },
-    [livekit],
+    [livekitEndCall],
+  );
+
+  const activeSessionId = connection?.session.id ?? null;
+
+  const actionsValue = useMemo<ActiveCallActionsValue>(
+    () => ({
+      sessionActive,
+      activeSessionId,
+      startImmediateCall,
+      prewarmCallIntent,
+      joinAcceptedCall,
+      joinSessionById,
+      endActiveCall,
+    }),
+    [
+      activeSessionId,
+      endActiveCall,
+      joinAcceptedCall,
+      joinSessionById,
+      prewarmCallIntent,
+      sessionActive,
+      startImmediateCall,
+    ],
   );
 
   const value = useMemo<ActiveCallContextValue>(
     () => ({
-      sessionActive,
-      activeSessionId: connection?.session.id ?? null,
+      ...actionsValue,
       connection,
       status: livekit.status,
       agentState: livekit.agentState,
@@ -240,20 +444,14 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       audioLevel: livekit.audioLevel,
       elapsedSeconds: livekit.elapsedSeconds,
       messages: livekit.messages,
-      startImmediateCall,
-      joinAcceptedCall,
-      joinSessionById,
       toggleMute: livekit.toggleMute,
       toggleCamera: livekit.toggleCamera,
       toggleScreenShare: livekit.toggleScreenShare,
       sendMessage: livekit.sendMessage,
-      endActiveCall,
     }),
     [
+      actionsValue,
       connection,
-      endActiveCall,
-      joinAcceptedCall,
-      joinSessionById,
       livekit.agentReady,
       livekit.agentState,
       livekit.audioLevel,
@@ -269,17 +467,29 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       livekit.toggleCamera,
       livekit.toggleMute,
       livekit.toggleScreenShare,
-      sessionActive,
       startError,
-      startImmediateCall,
     ],
   );
 
   return (
-    <ActiveCallContext.Provider value={value}>
-      {children}
-    </ActiveCallContext.Provider>
+    <ActiveCallActionsContext.Provider value={actionsValue}>
+      <ActiveCallContext.Provider value={value}>
+        {children}
+      </ActiveCallContext.Provider>
+    </ActiveCallActionsContext.Provider>
   );
+}
+
+/**
+ * Stable low-frequency slice for RootLayout & deep links — avoids re-rendering
+ * the app shell every second when elapsedSeconds/audioLevel/messages tick.
+ */
+export function useActiveCallActions(): ActiveCallActionsValue {
+  const ctx = useContext(ActiveCallActionsContext);
+  if (!ctx) {
+    throw new Error('useActiveCallActions must be used inside ActiveCallProvider');
+  }
+  return ctx;
 }
 
 export function useActiveCall(): ActiveCallContextValue {

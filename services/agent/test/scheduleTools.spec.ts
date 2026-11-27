@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { describe, it } from 'node:test';
-import { parseJobMetadata } from '../src/agentSession.js';
+import {
+  CONTROL_DATA_TOPIC,
+  parseJobMetadata,
+  resolveThinkingConfig,
+  waitForStandbyActivation,
+} from '../src/agentSession.js';
 import { createKallieScheduleTools } from '../src/scheduleTools.js';
 
 describe('parseJobMetadata', () => {
@@ -22,6 +28,47 @@ describe('parseJobMetadata', () => {
   it('returns empty object on invalid or missing metadata', () => {
     assert.deepEqual(parseJobMetadata(undefined), {});
     assert.deepEqual(parseJobMetadata('{invalid-json'), {});
+  });
+});
+
+describe('resolveThinkingConfig', () => {
+  it('defaults to MINIMAL thinkingLevel for gemini-3.1-flash-live-preview', () => {
+    assert.deepEqual(resolveThinkingConfig('gemini-3.1-flash-live-preview', undefined), {
+      thinkingLevel: 'MINIMAL',
+    });
+  });
+
+  it('respects valid GEMINI_THINKING_LEVEL overrides and omits for non-3.1 models', () => {
+    assert.deepEqual(resolveThinkingConfig('gemini-3.1-flash-live-preview', 'low'), {
+      thinkingLevel: 'LOW',
+    });
+    assert.equal(resolveThinkingConfig('gemini-3.1-flash-live-preview', 'default'), undefined);
+    assert.equal(resolveThinkingConfig('gemini-2.5-flash-native-audio-preview-12-2025', 'low'), undefined);
+  });
+});
+
+describe('waitForStandbyActivation', () => {
+  it('resolves activated when kallie.control start_call packet arrives', async () => {
+    const room = Object.assign(new EventEmitter(), { isConnected: true });
+    const waiter = waitForStandbyActivation(room, 15_000);
+
+    room.emit(
+      'dataReceived',
+      Buffer.from(JSON.stringify({ type: 'start_call' }), 'utf8'),
+      undefined,
+      undefined,
+      CONTROL_DATA_TOPIC,
+    );
+
+    assert.equal(await waiter, 'activated');
+  });
+
+  it('resolves disconnected when room closes before activation', async () => {
+    const room = Object.assign(new EventEmitter(), { isConnected: true });
+    const waiter = waitForStandbyActivation(room, 15_000);
+
+    room.emit('disconnected');
+    assert.equal(await waiter, 'disconnected');
   });
 });
 

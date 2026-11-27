@@ -59,9 +59,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-router',
+    'expo-sqlite',
+    'expo-secure-store',
     '@livekit/react-native-expo-plugin',
     '@config-plugins/react-native-webrtc',
-    './plugins/withCallKeepAndroid',
     './plugins/withAndroidOptimization',
     './plugins/withImmersiveAndroid',
     './plugins/withIncomingCallAndroid',
@@ -70,7 +71,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   updates: {
     enabled: true,
     url: `https://u.expo.dev/${EAS_PROJECT_ID}`,
-    checkAutomatically: 'ON_LOAD',
+    checkAutomatically: 'NEVER',
     fallbackToCacheTimeout: 0,
   },
   runtimeVersion: {

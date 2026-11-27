@@ -18,6 +18,8 @@ export interface CallSchedule {
   recurrence: RecurrenceType;
   next_run_at: string | null;
   status: ScheduleStatus;
+  reminder_offset_minutes?: number;
+  reminder_sent_at?: string | null;
   created_at: string;
   updated_at: string;
 }
