@@ -10,7 +10,7 @@ const GITHUB_RELEASE_CACHE_KEY = 'meta:github_latest_release';
 const OTA_CHECK_CACHE_KEY = 'meta:expo_ota_check';
 const GITHUB_RELEASE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const GITHUB_RELEASE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours SWR
-const OTA_CHECK_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const OTA_CHECK_TTL_MS = 5 * 60 * 1000; // 5 minutes in-memory (always checks once on cold launch)
 
 interface CachedGithubRelease {
   tagName: string;
@@ -61,7 +61,7 @@ export function useAutoUpdate() {
             cacheManager.set(
               OTA_CHECK_CACHE_KEY,
               { checkedAt: Date.now() },
-              { ttlMs: OTA_CHECK_TTL_MS, persist: true },
+              { ttlMs: OTA_CHECK_TTL_MS, persist: false },
             );
             if (result.isAvailable) {
               setDismissed(false);
