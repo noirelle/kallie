@@ -71,6 +71,7 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EAS_LOCAL_BUILD_SKIP_CLEANUP: "1"
+          GOOGLE_SERVICES_JSON: ${{ github.workspace }}/apps/mobile/google-services.json
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
