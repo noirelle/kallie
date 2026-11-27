@@ -316,20 +316,10 @@ export function ActiveCallView({
             ]}
             pointerEvents="none"
           >
-            <Text
-              style={[
-                styles.promptText,
-                effectiveConnectionStatus === 'disconnected' && styles.promptTextOffline,
-                effectiveConnectionStatus === 'weak' && styles.promptTextWeak,
-              ]}
-            >
-              {effectiveConnectionStatus === 'disconnected'
-                ? 'No internet connection.'
-                : effectiveConnectionStatus === 'weak'
-                  ? 'Weak connection. Tap Aura to talk.'
-                  : microphoneMissing
-                    ? 'Tap Aura to allow microphone & talk.'
-                    : 'Tap Aura to talk.'}
+            <Text style={styles.promptText}>
+              {microphoneMissing
+                ? 'Tap Aura to allow microphone & talk.'
+                : 'Tap Aura to talk.'}
             </Text>
           </Animated.View>
 
@@ -555,12 +545,6 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     letterSpacing: -0.1,
     textAlign: 'center',
-  },
-  promptTextOffline: {
-    color: '#F87171',
-  },
-  promptTextWeak: {
-    color: '#FACC15',
   },
   errorText: {
     position: 'absolute',
