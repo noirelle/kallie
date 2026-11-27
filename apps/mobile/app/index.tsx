@@ -15,8 +15,12 @@ import { usePermissions } from '../src/features/permissions/hooks/usePermissions
 export default function HomeScreen() {
   const router = useRouter();
   const { user, loading } = useAuth();
-  const { hydrated: permissionsHydrated, allRequiredGranted, revokedPermissions } =
-    usePermissions();
+  const {
+    hydrated: permissionsHydrated,
+    allRequiredGranted,
+    missingRequired,
+    meta: permissionMeta,
+  } = usePermissions();
   const {
     sessionActive,
     status,
@@ -35,17 +39,17 @@ export default function HomeScreen() {
     endActiveCall,
   } = useActiveCall();
 
-  const permissionsNeedAttention =
-    permissionsHydrated && (!allRequiredGranted || revokedPermissions.length > 0);
+  // Only show the permission indicator when a REQUIRED permission is missing,
+  // denied, or revoked; optional permissions never clutter the Home screen.
+  const hasMissingRequiredPermission = permissionsHydrated && !allRequiredGranted;
+  const hasRevokedRequiredPermission = missingRequired.some(
+    (descriptor) => permissionMeta[descriptor.id].revoked,
+  );
 
   const handleOpenPermissions = useCallback(() => {
-    const reason = !allRequiredGranted
-      ? 'call_microphone'
-      : revokedPermissions.length > 0
-        ? 'revoked'
-        : 'settings';
+    const reason = hasRevokedRequiredPermission ? 'revoked' : 'call_microphone';
     router.push({ pathname: '/permissions', params: { reason } });
-  }, [allRequiredGranted, revokedPermissions.length, router]);
+  }, [hasRevokedRequiredPermission, router]);
 
   if (loading || !user) {
     return <View style={styles.blank} />;
@@ -70,8 +74,8 @@ export default function HomeScreen() {
         camera: false,
         chat: true,
       }}
-      permissionsNeedAttention={permissionsNeedAttention}
-      microphoneMissing={permissionsHydrated && !allRequiredGranted}
+      showPermissionIndicator={hasMissingRequiredPermission}
+      microphoneMissing={hasMissingRequiredPermission}
       onOpenPermissions={handleOpenPermissions}
       onStartCall={startImmediateCall}
       onStartCallPressIn={prewarmCallIntent}

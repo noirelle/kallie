@@ -24,7 +24,7 @@ interface PermissionManagerScreenProps {
 function getReasonBanner(
   reason: PermissionRedirectReason | undefined,
   allRequiredGranted: boolean,
-  hasRevoked: boolean,
+  hasRequiredRevoked: boolean,
 ): { title: string; body: string } | null {
   if (allRequiredGranted && reason && reason !== 'settings') {
     return {
@@ -32,16 +32,16 @@ function getReasonBanner(
       body: 'You are ready to talk with Kallie.',
     };
   }
+  if (reason === 'revoked' || hasRequiredRevoked) {
+    return {
+      title: 'A required permission was turned off',
+      body: 'Re-enable required access below so Kallie can start voice calls.',
+    };
+  }
   if (reason === 'call_microphone' || reason === 'incoming_call') {
     return {
       title: 'Microphone access required',
       body: 'Enable Microphone below so Kallie can hear you and keep calls running smoothly.',
-    };
-  }
-  if (reason === 'revoked' || hasRevoked) {
-    return {
-      title: 'A permission was turned off',
-      body: 'Some access was revoked in device settings. Re-enable it below to restore full functionality.',
     };
   }
   return null;
@@ -146,19 +146,19 @@ export function PermissionManagerScreen({
     requiredDescriptors,
     optionalDescriptors,
     allRequiredGranted,
-    revokedPermissions,
+    missingRequired,
     togglePermission,
     openSettings,
   } = usePermissions({ syncOnResume: true });
 
+  const hasRequiredRevoked = useMemo(
+    () => missingRequired.some((d) => meta[d.id].revoked),
+    [meta, missingRequired],
+  );
+
   const banner = useMemo(
-    () =>
-      getReasonBanner(
-        reason,
-        allRequiredGranted,
-        revokedPermissions.length > 0,
-      ),
-    [allRequiredGranted, reason, revokedPermissions.length],
+    () => getReasonBanner(reason, allRequiredGranted, hasRequiredRevoked),
+    [allRequiredGranted, hasRequiredRevoked, reason],
   );
 
   return (

@@ -52,7 +52,7 @@ interface ActiveCallViewProps {
   error: string | null;
   messages: CallChatMessage[];
   controls?: AgentControlBarControls;
-  permissionsNeedAttention?: boolean;
+  showPermissionIndicator?: boolean;
   microphoneMissing?: boolean;
   onOpenPermissions?: () => void;
   onStartCall?: () => void;
@@ -91,7 +91,7 @@ export function ActiveCallView({
   error,
   messages,
   controls = DEFAULT_CONTROLS,
-  permissionsNeedAttention = false,
+  showPermissionIndicator = false,
   microphoneMissing = false,
   onOpenPermissions,
   onStartCall,
@@ -249,20 +249,20 @@ export function ActiveCallView({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        {/* Quiet top-right Permissions access pill while idle */}
-        {!isSessionActive && onOpenPermissions ? (
+        {/* Permission indicator — strictly hidden when all required permissions are granted */}
+        {!isSessionActive && showPermissionIndicator && onOpenPermissions ? (
           <View style={styles.idleTopBar} pointerEvents="box-none">
             <Pressable
               style={({ pressed }) => [
                 styles.permissionsPill,
-                permissionsNeedAttention && styles.permissionsPillAlert,
+                styles.permissionsPillAlert,
                 pressed && styles.permissionsPillPressed,
               ]}
               onPress={onOpenPermissions}
               hitSlop={8}
-              accessibilityLabel="Manage app permissions"
+              accessibilityLabel="Required permission missing. Open permission settings."
             >
-              {permissionsNeedAttention ? <View style={styles.alertDot} /> : null}
+              <View style={styles.alertDot} />
               <Text style={styles.permissionsPillText}>Permissions</Text>
             </Pressable>
           </View>
