@@ -1,8 +1,10 @@
-import React from 'react';
+import { useRouter } from 'expo-router';
+import React, { useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { ActiveCallView } from '../src/features/calling/components/ActiveCallView';
 import { useActiveCall } from '../src/features/calling/context/ActiveCallContext';
+import { usePermissions } from '../src/features/permissions/hooks/usePermissions';
 
 /**
  * Unified pure-black (#000000) Aura canvas backed by the singleton ActiveCallContext.
@@ -11,7 +13,10 @@ import { useActiveCall } from '../src/features/calling/context/ActiveCallContext
  * LiveKit session with zero reconnection and zero duplicate connections.
  */
 export default function HomeScreen() {
+  const router = useRouter();
   const { user, loading } = useAuth();
+  const { hydrated: permissionsHydrated, allRequiredGranted, revokedPermissions } =
+    usePermissions();
   const {
     sessionActive,
     status,
@@ -29,6 +34,18 @@ export default function HomeScreen() {
     toggleMute,
     endActiveCall,
   } = useActiveCall();
+
+  const permissionsNeedAttention =
+    permissionsHydrated && (!allRequiredGranted || revokedPermissions.length > 0);
+
+  const handleOpenPermissions = useCallback(() => {
+    const reason = !allRequiredGranted
+      ? 'call_microphone'
+      : revokedPermissions.length > 0
+        ? 'revoked'
+        : 'settings';
+    router.push({ pathname: '/permissions', params: { reason } });
+  }, [allRequiredGranted, revokedPermissions.length, router]);
 
   if (loading || !user) {
     return <View style={styles.blank} />;
@@ -53,6 +70,9 @@ export default function HomeScreen() {
         camera: false,
         chat: true,
       }}
+      permissionsNeedAttention={permissionsNeedAttention}
+      microphoneMissing={permissionsHydrated && !allRequiredGranted}
+      onOpenPermissions={handleOpenPermissions}
       onStartCall={startImmediateCall}
       onStartCallPressIn={prewarmCallIntent}
       onSendMessage={sendMessage}

@@ -185,16 +185,31 @@ class KallieCallForegroundService : Service() {
     var activeSessionId: String? = null
       private set
 
-    fun start(context: Context, sessionId: String, title: String) {
+    fun hasMicrophonePermission(context: Context): Boolean {
+      return ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.RECORD_AUDIO
+      ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun start(context: Context, sessionId: String, title: String): Boolean {
+      // CRITICAL (Android 12-16): NEVER invoke startForegroundService() unless RECORD_AUDIO
+      // is already granted; otherwise onStartCommand cannot enter microphone FGS and Android
+      // throws fatal RemoteServiceException$ForegroundServiceDidNotStartInTimeException.
+      if (!hasMicrophonePermission(context)) {
+        return false
+      }
       val intent = Intent(context, KallieCallForegroundService::class.java).apply {
         action = ACTION_START
         putExtra(KallieIncomingCallModule.EXTRA_SESSION_ID, sessionId)
         putExtra(KallieIncomingCallModule.EXTRA_TITLE, title)
       }
-      try {
+      return try {
         ContextCompat.startForegroundService(context, intent)
+        true
       } catch (_: Throwable) {
-        // Ignore if Android restricts FGS start in an unexpected state
+        // Ignore ForegroundServiceStartNotAllowedException or OEM background restrictions
+        false
       }
     }
 
@@ -219,18 +234,23 @@ class KallieCallForegroundService : Service() {
     val sessionId = intent?.getStringExtra(KallieIncomingCallModule.EXTRA_SESSION_ID) ?: ""
     val title = intent?.getStringExtra(KallieIncomingCallModule.EXTRA_TITLE) ?: "Kallie"
 
-    val hasMicPerm = ContextCompat.checkSelfPermission(
-      this,
-      Manifest.permission.RECORD_AUDIO
-    ) == PackageManager.PERMISSION_GRANTED
+    ensureOngoingChannel()
+    val notification = buildOngoingNotification(sessionId, title)
 
+    val hasMicPerm = hasMicrophonePermission(this)
     if (!hasMicPerm) {
+      // Permission was revoked mid-flight between start() and onStartCommand().
+      // On Android 8+, a service launched via startForegroundService() must still
+      // call startForeground() before stopSelf() or the OS kills the process.
+      try {
+        startForeground(ONGOING_NOTIFICATION_ID, notification)
+      } catch (_: Throwable) {
+        // Ignore if OS rejects FGS promotion without mic permission
+      }
+      activeSessionId = null
       stopSelf()
       return START_NOT_STICKY
     }
-
-    ensureOngoingChannel()
-    val notification = buildOngoingNotification(sessionId, title)
 
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -688,6 +708,9 @@ class KallieIncomingCallModule(private val reactContext: ReactApplicationContext
 
   @ReactMethod
   fun startCallForegroundService(sessionId: String, title: String) {
+    if (!KallieCallForegroundService.hasMicrophonePermission(reactContext)) {
+      return
+    }
     createChannelsInternal()
     if (sessionId.isNotBlank()) {
       NotificationManagerCompat.from(reactContext).cancel(notificationIdFor(sessionId))
@@ -793,6 +816,27 @@ class KallieIncomingCallModule(private val reactContext: ReactApplicationContext
       } else {
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
           putExtra(Settings.EXTRA_APP_PACKAGE, reactContext.packageName)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      }
+      reactContext.startActivity(intent)
+      promise.resolve(true)
+    } catch (_: Throwable) {
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
+  fun openNotificationSettings(promise: Promise) {
+    try {
+      val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+          putExtra(Settings.EXTRA_APP_PACKAGE, reactContext.packageName)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      } else {
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+          data = Uri.parse("package:\${reactContext.packageName}")
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
       }

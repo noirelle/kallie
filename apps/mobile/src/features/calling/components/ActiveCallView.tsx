@@ -52,6 +52,9 @@ interface ActiveCallViewProps {
   error: string | null;
   messages: CallChatMessage[];
   controls?: AgentControlBarControls;
+  permissionsNeedAttention?: boolean;
+  microphoneMissing?: boolean;
+  onOpenPermissions?: () => void;
   onStartCall?: () => void;
   onStartCallPressIn?: () => void;
   onSendMessage: (text: string) => Promise<void>;
@@ -88,6 +91,9 @@ export function ActiveCallView({
   error,
   messages,
   controls = DEFAULT_CONTROLS,
+  permissionsNeedAttention = false,
+  microphoneMissing = false,
+  onOpenPermissions,
   onStartCall,
   onStartCallPressIn,
   onSendMessage,
@@ -243,6 +249,25 @@ export function ActiveCallView({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
+        {/* Quiet top-right Permissions access pill while idle */}
+        {!isSessionActive && onOpenPermissions ? (
+          <View style={styles.idleTopBar} pointerEvents="box-none">
+            <Pressable
+              style={({ pressed }) => [
+                styles.permissionsPill,
+                permissionsNeedAttention && styles.permissionsPillAlert,
+                pressed && styles.permissionsPillPressed,
+              ]}
+              onPress={onOpenPermissions}
+              hitSlop={8}
+              accessibilityLabel="Manage app permissions"
+            >
+              {permissionsNeedAttention ? <View style={styles.alertDot} /> : null}
+              <Text style={styles.permissionsPillText}>Permissions</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* Persistent Centered Aura Layer — smoothly scales & glides via pure GPU transforms */}
         <View style={styles.auraBackdrop} pointerEvents="box-none">
           <Animated.View
@@ -290,7 +315,11 @@ export function ActiveCallView({
             ]}
             pointerEvents="none"
           >
-            <Text style={styles.promptText}>Tap Aura to talk.</Text>
+            <Text style={styles.promptText}>
+              {microphoneMissing
+                ? 'Tap Aura to allow microphone & talk.'
+                : 'Tap Aura to talk.'}
+            </Text>
           </Animated.View>
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -446,6 +475,43 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 20,
     justifyContent: 'flex-end',
+  },
+  idleTopBar: {
+    position: 'absolute',
+    top: 12,
+    right: 20,
+    zIndex: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  permissionsPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: '#111111',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+  },
+  permissionsPillAlert: {
+    borderColor: 'rgba(245, 158, 11, 0.42)',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+  },
+  permissionsPillPressed: {
+    backgroundColor: '#18181B',
+  },
+  alertDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#FBBF24',
+  },
+  permissionsPillText: {
+    color: '#D4D4D8',
+    fontSize: 12,
+    fontWeight: '500',
   },
   auraBackdrop: {
     position: 'absolute',

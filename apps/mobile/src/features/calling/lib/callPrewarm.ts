@@ -6,11 +6,12 @@ import {
   RoomEvent,
   Track,
 } from 'livekit-client';
-import { PermissionsAndroid, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { apiClient } from '../../../lib/apiClient';
 import { cacheManager } from '../../../lib/cache/cacheManager';
 import { appEnv } from '../../../lib/env';
 import { JoinCallResponse } from '../../../types/database';
+import { permissionManager } from '../../permissions/lib/permissionManager';
 
 export type LiveKitNativeModule = {
   registerGlobals: () => void;
@@ -40,7 +41,6 @@ export interface StagedStandbySession {
 export const CONTROL_DATA_TOPIC = 'kallie.control';
 
 let nativeGlobalsRegistered = false;
-let cachedMicGranted: boolean | null = null;
 let lastApiWarmAt = 0;
 let lastLiveKitWarmAt = 0;
 let standbyRoom: Room | null = null;
@@ -190,56 +190,23 @@ export async function resolveOptimalLiveKitUrl(
   }
 }
 
-export async function refreshCachedMicPermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') {
-    cachedMicGranted = true;
-    return true;
-  }
-  try {
-    const granted = await PermissionsAndroid.check(
-      PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-    );
-    cachedMicGranted = granted;
-    return granted;
-  } catch {
-    return false;
-  }
+export async function hasMicrophonePermission(): Promise<boolean> {
+  return (await permissionManager.checkPermission('microphone')) === 'granted';
 }
 
-export async function ensureMicrophonePermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') {
-    return true;
-  }
-  if (cachedMicGranted === true) {
-    return true;
-  }
-  const alreadyGranted = await refreshCachedMicPermission();
-  if (alreadyGranted) {
-    return true;
-  }
-  const result = await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-    {
-      title: 'Microphone Permission',
-      message: 'Kallie needs microphone access so you can talk during voice calls.',
-      buttonPositive: 'Allow',
-      buttonNegative: 'Cancel',
-    },
-  );
-  const granted = result === PermissionsAndroid.RESULTS.GRANTED;
-  cachedMicGranted = granted;
-  return granted;
+export function hasMicrophonePermissionSync(): boolean {
+  return permissionManager.isGrantedSync('microphone');
 }
 
 /**
  * Pre-warms DNS, TLS keep-alive sockets, LiveKit edge connection, and cached
- * Android microphone permission before the user taps Aura.
+ * microphone permission status (non-prompting) before the user taps Aura.
  */
 export function prewarmCallInfrastructure(force = false): void {
   registerLiveKitGlobals();
   const now = Date.now();
 
-  void refreshCachedMicPermission();
+  void permissionManager.checkPermission('microphone');
 
   if (appEnv.apiUrl && (force || now - lastApiWarmAt > PREWARM_THROTTLE_MS)) {
     lastApiWarmAt = now;
@@ -459,7 +426,7 @@ export function activateStandbyImperatively(
   }
 
   if (!staged.preCapturedMicPromise) {
-    staged.preCapturedMicPromise = ensureMicrophonePermission()
+    staged.preCapturedMicPromise = hasMicrophonePermission()
       .then((granted) => {
         if (!granted || staged.disposed) return null;
         return createLocalAudioTrack({

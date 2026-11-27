@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import React, {
   createContext,
   ReactNode,
@@ -32,7 +33,8 @@ import {
 import {
   activateStandbyImperatively,
   consumeStandbySession,
-  ensureMicrophonePermission,
+  hasMicrophonePermission,
+  hasMicrophonePermissionSync,
   prewarmCallInfrastructure,
   prewarmOnTouchIntent,
   StagedStandbySession,
@@ -76,6 +78,7 @@ const ActiveCallActionsContext = createContext<ActiveCallActionsValue | null>(nu
 const ActiveCallContext = createContext<ActiveCallContextValue | null>(null);
 
 export function ActiveCallProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const [sessionActive, setSessionActive] = useState(false);
   const [connection, setConnection] = useState<JoinCallResponse | null>(null);
   const [activeStandby, setActiveStandby] = useState<StagedStandbySession | null>(null);
@@ -160,6 +163,29 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
     setTimeout(() => prewarmCallInfrastructure(true), 600);
   }, []);
 
+  const redirectToPermissions = useCallback(
+    (reason: 'call_microphone' | 'incoming_call') => {
+      try {
+        router.push({ pathname: '/permissions', params: { reason } });
+      } catch {
+        // Safe no-op if navigator is not yet mounted
+      }
+    },
+    [router],
+  );
+
+  const handleMissingCallPermission = useCallback(() => {
+    attemptIdRef.current += 1;
+    nativeIncomingCall.stopCallForegroundService();
+    void stopAudioSessionSafe();
+    setSessionActive(false);
+    setConnection(null);
+    setActiveStandby(null);
+    setCallStartedAtMs(null);
+    setStartError(null);
+    redirectToPermissions('call_microphone');
+  }, [redirectToPermissions]);
+
   const livekit = useLiveKitCall({
     sessionId: connection?.session.id ?? '',
     livekitUrl: connection?.livekitUrl ?? '',
@@ -168,13 +194,14 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
     callStartedAtMs: callStartedAtMs ?? undefined,
     preconnectedStandby: activeStandby,
     onRemoteEnded: handleRemoteEnded,
+    onMissingPermission: handleMissingCallPermission,
   });
 
   // Synchronize native Android microphone Foreground Service with the active call lifecycle.
-  // Guarantees ongoing LiveKit audio survives minimizing Kallie or locking the screen,
-  // and ensures the service is always torn down cleanly when the call ends.
+  // Strictly guarded by RECORD_AUDIO permission so Android never throws
+  // ForegroundServiceDidNotStartInTimeException when mic access is missing or revoked.
   useEffect(() => {
-    if (sessionActive && connection?.session.id) {
+    if (sessionActive && connection?.session.id && hasMicrophonePermissionSync()) {
       nativeIncomingCall.startCallForegroundService(
         connection.session.id,
         connection.session.title || 'Kallie',
@@ -189,6 +216,16 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
 
   const startImmediateCall = useCallback(async () => {
     if (sessionActive) return;
+
+    // Non-prompting live check (~1ms): if Microphone is missing or revoked, redirect
+    // cleanly to the Permission Management page instead of crashing or spamming dialogs.
+    const hasMic = await hasMicrophonePermission();
+    if (!hasMic) {
+      setStartError(null);
+      redirectToPermissions('call_microphone');
+      return;
+    }
+
     const attemptId = ++attemptIdRef.current;
     const startedAt = Date.now();
     setStartError(null);
@@ -196,14 +233,8 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
     // Enter active session immediately for 0ms perceived latency
     setSessionActive(true);
 
-    // Overlap local mic permission check & native AudioSession setup at t=0ms
-    void ensureMicrophonePermission()
-      .then((granted) => {
-        if (granted && attemptIdRef.current === attemptId) {
-          return warmAudioSessionEarly();
-        }
-      })
-      .catch(() => {});
+    // Overlap native AudioSession setup at t=0ms
+    void warmAudioSessionEarly().catch(() => {});
 
     // Fast path: adopt already-connected (or in-flight) Home-screen standby session
     // and trigger `start_call` + mic capture IMPERATIVELY at t=0ms before React renders.
@@ -258,34 +289,39 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       setCallStartedAtMs(null);
       setStartError(err instanceof Error ? err.message : 'Unable to connect');
     }
-  }, [sessionActive]);
+  }, [redirectToPermissions, sessionActive]);
 
-  const joinAcceptedCall = useCallback((joinData: JoinCallResponse) => {
-    const targetId = joinData.session.id;
-    // Prevent duplicate LiveKit connections if already active on this session
-    if (activeSessionIdRef.current === targetId && sessionActive) {
-      return;
-    }
+  const joinAcceptedCall = useCallback(
+    (joinData: JoinCallResponse) => {
+      const targetId = joinData.session.id;
+      // Prevent duplicate LiveKit connections if already active on this session
+      if (activeSessionIdRef.current === targetId && sessionActive) {
+        return;
+      }
 
-    void teardownStandbySession();
-    attemptIdRef.current += 1;
-    setStartError(null);
-    setActiveStandby(null);
-    setCallStartedAtMs((prev) => prev ?? Date.now());
-    setPendingCallConnection(joinData);
-    nativeIncomingCall.dismissIncomingCall(targetId);
-    nativeIncomingCall.startCallForegroundService(
-      targetId,
-      joinData.session.title || 'Kallie',
-    );
-    void ensureMicrophonePermission()
-      .then((granted) => {
-        if (granted) return warmAudioSessionEarly();
-      })
-      .catch(() => {});
-    setConnection(joinData);
-    setSessionActive(true);
-  }, [sessionActive]);
+      if (!hasMicrophonePermissionSync()) {
+        nativeIncomingCall.dismissIncomingCall(targetId);
+        redirectToPermissions('incoming_call');
+        return;
+      }
+
+      void teardownStandbySession();
+      attemptIdRef.current += 1;
+      setStartError(null);
+      setActiveStandby(null);
+      setCallStartedAtMs((prev) => prev ?? Date.now());
+      setPendingCallConnection(joinData);
+      nativeIncomingCall.dismissIncomingCall(targetId);
+      nativeIncomingCall.startCallForegroundService(
+        targetId,
+        joinData.session.title || 'Kallie',
+      );
+      void warmAudioSessionEarly().catch(() => {});
+      setConnection(joinData);
+      setSessionActive(true);
+    },
+    [redirectToPermissions, sessionActive],
+  );
 
   const joinSessionById = useCallback(
     async (sessionId: string): Promise<JoinCallResponse | null> => {
@@ -296,6 +332,13 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
         return connection;
       }
       if (inFlightAcceptSessionRef.current === sessionId) {
+        return null;
+      }
+
+      const hasMic = await hasMicrophonePermission();
+      if (!hasMic) {
+        nativeIncomingCall.dismissIncomingCall(sessionId);
+        redirectToPermissions('incoming_call');
         return null;
       }
 
@@ -317,13 +360,7 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       setConnection(null);
 
       // Warm AudioSession in parallel with POST /calls/:id/accept
-      void ensureMicrophonePermission()
-        .then((granted) => {
-          if (granted && attemptIdRef.current === attemptId) {
-            return warmAudioSessionEarly();
-          }
-        })
-        .catch(() => {});
+      void warmAudioSessionEarly().catch(() => {});
 
       try {
         const joinData = await apiClient.acceptCall(sessionId);
@@ -358,7 +395,7 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [connection, joinAcceptedCall, sessionActive],
+    [connection, joinAcceptedCall, redirectToPermissions, sessionActive],
   );
 
   const prewarmCallIntent = useCallback(() => {

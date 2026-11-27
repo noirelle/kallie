@@ -8,14 +8,15 @@ import {
   Track,
 } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PermissionsAndroid, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { AuraConnectionStatus } from '../../../components/auraTheme';
 import { apiClient } from '../../../lib/apiClient';
 import { clearPendingCallConnection } from '../../../lib/callSessionStore';
+import { permissionManager } from '../../permissions/lib/permissionManager';
 import {
-  ensureMicrophonePermission,
   getCachedRegionalLiveKitUrl,
   getNativeLiveKit,
+  hasMicrophonePermission,
   invalidateCachedRegionalLiveKitUrl,
   registerLiveKitGlobals,
   resolveOptimalLiveKitUrl,
@@ -68,6 +69,7 @@ export function useLiveKitCall(params: {
   callStartedAtMs?: number;
   preconnectedStandby?: StagedStandbySession | null;
   onRemoteEnded?: () => void;
+  onMissingPermission?: (id: 'microphone') => void;
 }) {
   const isEnabled = params.enabled !== false;
   const [status, setStatus] = useState<CallConnectionState>(
@@ -164,6 +166,8 @@ export function useLiveKitCall(params: {
   preconnectedStandbyRef.current = params.preconnectedStandby ?? null;
   const onRemoteEndedRef = useRef(params.onRemoteEnded);
   onRemoteEndedRef.current = params.onRemoteEnded;
+  const onMissingPermissionRef = useRef(params.onMissingPermission);
+  onMissingPermissionRef.current = params.onMissingPermission;
 
   useEffect(() => {
     if (status !== 'connected' && status !== 'agent_speaking') {
@@ -423,9 +427,15 @@ export function useLiveKitCall(params: {
 
     const connect = async () => {
       try {
-        const hasMicPermission = await ensureMicrophonePermission();
+        const hasMicPermission = await hasMicrophonePermission();
         if (!hasMicPermission) {
-          throw new Error('Microphone permission is required for voice calls.');
+          if (!cancelled) {
+            setStatus('disconnected');
+            setAgentState('idle');
+            setConnectionStatus('idle');
+            onMissingPermissionRef.current?.('microphone');
+          }
+          return;
         }
 
         // Fast-path activation if we adopted a pre-connected standby room:
@@ -645,10 +655,8 @@ export function useLiveKitCall(params: {
     const nextCamera = !isCameraOn;
     try {
       if (Platform.OS === 'android' && nextCamera) {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-        );
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        const camStatus = await permissionManager.requestPermission('camera');
+        if (camStatus !== 'granted') {
           return;
         }
       }

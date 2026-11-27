@@ -33,6 +33,7 @@ interface NativeKallieIncomingCall {
   consumePendingCallIntent: () => Promise<IncomingCallIntentEvent | null>;
   canUseFullScreenIntent: () => Promise<boolean>;
   openFullScreenIntentSettings: () => Promise<boolean>;
+  openNotificationSettings?: () => Promise<boolean>;
 }
 
 const nativeMod: NativeKallieIncomingCall | null =
@@ -142,6 +143,15 @@ export const nativeIncomingCall = {
     if (!nativeMod) return false;
     try {
       return await nativeMod.openFullScreenIntentSettings();
+    } catch {
+      return false;
+    }
+  },
+
+  async openNotificationSettings(): Promise<boolean> {
+    if (!nativeMod?.openNotificationSettings) return false;
+    try {
+      return await nativeMod.openNotificationSettings();
     } catch {
       return false;
     }

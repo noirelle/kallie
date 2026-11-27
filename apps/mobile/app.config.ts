@@ -12,7 +12,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'kallie',
   owner: 'noirelle',
   scheme: 'kallie',
-  version: '0.1.3',
+  version: '0.1.4',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'dark',

@@ -25,6 +25,7 @@ import {
 } from '../src/features/calling/hooks/useNativeCallKeep';
 import { useAuraGuide } from '../src/features/onboarding/hooks/useAuraGuide';
 import { useOnboardingPermissions } from '../src/features/onboarding/hooks/useOnboardingPermissions';
+import { permissionManager } from '../src/features/permissions/lib/permissionManager';
 import { AppUpdateBanner } from '../src/features/updates/components/AppUpdateBanner';
 import { useAutoUpdate } from '../src/features/updates/hooks/useAutoUpdate';
 import { startRealtimeSync, syncUserData } from '../src/features/schedules/lib/syncEngine';
@@ -158,12 +159,21 @@ function RootLayoutContent() {
       RNStatusBar.setHidden(true, 'fade');
     };
     enforceHiddenStatusBar();
+    // Silently keep permission state synchronized (detecting revocations in Settings)
+    // without ever displaying an unprompted OS permission dialog on boot or resume.
+    const cancelPermSync = scheduleAfterPaint(() => {
+      void permissionManager.refreshAll();
+    });
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         enforceHiddenStatusBar();
+        void permissionManager.refreshAll();
       }
     });
-    return () => sub.remove();
+    return () => {
+      cancelPermSync();
+      sub.remove();
+    };
   }, []);
 
   // Keep local SQLite schedules & call history synchronized via 1 unified Realtime channel + delta pull.

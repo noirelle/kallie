@@ -227,8 +227,9 @@ export function useNativeCallKeep(
         if (!messaging) return;
 
         try {
-          await messaging.requestPermission();
-          if (cancelled) return;
+          // Never spam OS notification prompts on app launch — notification access
+          // is managed centrally in the Permission Management screen. FCM token
+          // registration works cleanly even while notifications are optional/off.
           const fcmToken = await messaging.getToken();
           if (fcmToken && !cancelled) {
             const prefKey = `fcm_reg:${userId}`;
