@@ -1,13 +1,18 @@
+import { ActivityHandling, EndSensitivity, StartSensitivity } from '@google/genai';
+import { AudioFrame } from '@livekit/rtc-node';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { describe, it } from 'node:test';
 import {
   CONTROL_DATA_TOPIC,
   parseJobMetadata,
+  resolveContextWindowCompression,
+  resolveRealtimeInputConfig,
   resolveThinkingConfig,
   waitForStandbyActivation,
 } from '../src/agentSession.js';
 import { createKallieScheduleTools } from '../src/scheduleTools.js';
+import { computeFrameRms, SileroSpeechGateProcessor } from '../src/speechGate.js';
 
 describe('parseJobMetadata', () => {
   it('parses valid JSON metadata cleanly', () => {
@@ -114,5 +119,72 @@ describe('createKallieScheduleTools', () => {
 
     assert.equal(result.ok, false);
     assert.ok(result.error);
+  });
+});
+
+describe('resolveRealtimeInputConfig & resolveContextWindowCompression', () => {
+  it('configures low start sensitivity, high end sensitivity, and bounded silence duration', () => {
+    const defaults = resolveRealtimeInputConfig(undefined);
+    assert.equal(defaults.activityHandling, ActivityHandling.START_OF_ACTIVITY_INTERRUPTS);
+    assert.equal(
+      defaults.automaticActivityDetection?.startOfSpeechSensitivity,
+      StartSensitivity.START_SENSITIVITY_LOW,
+    );
+    assert.equal(
+      defaults.automaticActivityDetection?.endOfSpeechSensitivity,
+      EndSensitivity.END_SENSITIVITY_HIGH,
+    );
+    assert.equal(defaults.automaticActivityDetection?.silenceDurationMs, 320);
+
+    assert.equal(
+      resolveRealtimeInputConfig('100').automaticActivityDetection?.silenceDurationMs,
+      220,
+    );
+    assert.equal(
+      resolveRealtimeInputConfig('1500').automaticActivityDetection?.silenceDurationMs,
+      800,
+    );
+  });
+
+  it('configures sliding-window context compression with a wide 6k-token stride', () => {
+    const compression = resolveContextWindowCompression();
+    assert.equal(compression.triggerTokens, '12000');
+    assert.equal(compression.slidingWindow?.targetTokens, '6000');
+  });
+});
+
+describe('SileroSpeechGateProcessor', () => {
+  it('zeroes steady low-amplitude ambient noise while passing high-energy speech immediately', () => {
+    const gate = new SileroSpeechGateProcessor({
+      hangoverMs: 40,
+      vadOverride: {
+        predict: async () => 0.05,
+        reset: () => {},
+      },
+    });
+
+    // Steady -42dBFS room floor (~120 amp) -> gated to digital zeros
+    const noiseSamples = new Int16Array(320).fill(120);
+    const noiseFrame = new AudioFrame(noiseSamples, 16_000, 1, 320);
+    const gatedNoise = gate.process(noiseFrame);
+    assert.equal(computeFrameRms(gatedNoise.data), 0);
+
+    // Sudden loud speech onset (3000 amp) -> passes through at 0ms attack latency
+    const speechSamples = new Int16Array(320).fill(3000);
+    const speechFrame = new AudioFrame(speechSamples, 16_000, 1, 320);
+    const passedSpeech = gate.process(speechFrame);
+    assert.equal(computeFrameRms(passedSpeech.data), 3000);
+
+    gate.close();
+  });
+
+  it('passes audio untouched when disabled or non-16kHz', () => {
+    const gate = new SileroSpeechGateProcessor({ vadOverride: null });
+    gate.setEnabled(false);
+
+    const noiseSamples = new Int16Array(320).fill(120);
+    const frame = new AudioFrame(noiseSamples, 16_000, 1, 320);
+    assert.equal(computeFrameRms(gate.process(frame).data), 120);
+    gate.close();
   });
 });

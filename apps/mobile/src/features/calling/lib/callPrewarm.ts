@@ -66,6 +66,11 @@ export const LIVEKIT_ROOM_OPTIONS = {
     noiseSuppression: true,
     autoGainControl: true,
   },
+  publishDefaults: {
+    // Opus DTX drops silent uplink packets cleanly; RED recovers mobile Wi-Fi/4G packet loss
+    dtx: true,
+    red: true,
+  },
 } as const;
 
 export function registerLiveKitGlobals(): void {

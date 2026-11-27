@@ -89,10 +89,10 @@ export function useLiveKitCall(params: {
     isEnabled ? 'connecting' : 'idle',
   );
   const [audioLevel, setAudioLevel] = useState(0);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [messages, setMessages] = useState<CallChatMessage[]>([]);
 
   const finalizedSegmentsRef = useRef<Set<string>>(new Set());
+  const lastAudioLevelEmitRef = useRef<{ value: number; at: number }>({ value: 0, at: 0 });
 
   const upsertMessage = useCallback(
     (
@@ -148,8 +148,10 @@ export function useLiveKitCall(params: {
         }
 
         const next = [...prev, { id, sender, text: cleaned, timestamp, isFinal }];
-        // Keep transcript chronologically ordered so user speech always precedes the reply it triggered
-        next.sort((a, b) => a.timestamp - b.timestamp);
+        // Fast-path O(1) append when already chronological; only sort out-of-order inserts
+        if (prev.length > 0 && prev[prev.length - 1].timestamp > timestamp) {
+          next.sort((a, b) => a.timestamp - b.timestamp);
+        }
         return next;
       });
     },
@@ -170,16 +172,6 @@ export function useLiveKitCall(params: {
   onMissingPermissionRef.current = params.onMissingPermission;
 
   useEffect(() => {
-    if (status !== 'connected' && status !== 'agent_speaking') {
-      return;
-    }
-    const timer = setInterval(() => {
-      setElapsedSeconds((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [status]);
-
-  useEffect(() => {
     if (!isEnabled) {
       setStatus('disconnected');
       setAgentState('idle');
@@ -190,8 +182,8 @@ export function useLiveKitCall(params: {
       setAgentJoined(false);
       setAgentReady(false);
       setConnectionStatus('idle');
+      lastAudioLevelEmitRef.current = { value: 0, at: 0 };
       setAudioLevel(0);
-      setElapsedSeconds(0);
       // Defer clearing messages until the 260ms exit fade-out finishes so transcript
       // fades out smoothly instead of vanishing abruptly on frame 0
       const clearTimer = setTimeout(() => {
@@ -282,6 +274,7 @@ export function useLiveKitCall(params: {
       const remoteSpeaker = speakers.find(
         (speaker) => speaker.identity !== room.localParticipant.identity,
       );
+      const now = Date.now();
       if (remoteSpeaker) {
         if (!loggedFirstSpeaking) {
           loggedFirstSpeaking = true;
@@ -289,15 +282,26 @@ export function useLiveKitCall(params: {
             `[CallPerf] firstAgentSpeaking(audio)=${elapsedMs()}ms session=${params.sessionId}`,
           );
         }
-        setAgentReady(true);
+        setAgentReady((prev) => (prev ? prev : true));
         markConnectedIfStable();
-        setStatus('agent_speaking');
-        setAgentState('speaking');
-        setAudioLevel(Math.max(0.35, Math.min(1, remoteSpeaker.audioLevel || 0.65)));
+        setStatus((prev) => (prev === 'agent_speaking' ? prev : 'agent_speaking'));
+        setAgentState((prev) => (prev === 'speaking' ? prev : 'speaking'));
+        const quantized =
+          Math.round(Math.max(0.35, Math.min(1, remoteSpeaker.audioLevel || 0.65)) * 12) / 12;
+        if (
+          Math.abs(quantized - lastAudioLevelEmitRef.current.value) >= 0.08 &&
+          now - lastAudioLevelEmitRef.current.at >= 120
+        ) {
+          lastAudioLevelEmitRef.current = { value: quantized, at: now };
+          setAudioLevel(quantized);
+        }
       } else if (wasConnectedRef.current) {
-        setStatus('connected');
-        setAgentState((prev) => (prev === 'thinking' ? 'thinking' : 'listening'));
-        setAudioLevel(0.12);
+        setStatus((prev) => (prev === 'connected' ? prev : 'connected'));
+        setAgentState((prev) => (prev === 'thinking' ? 'thinking' : prev === 'listening' ? prev : 'listening'));
+        if (lastAudioLevelEmitRef.current.value !== 0.12) {
+          lastAudioLevelEmitRef.current = { value: 0.12, at: now };
+          setAudioLevel(0.12);
+        }
       }
     });
 
@@ -389,16 +393,44 @@ export function useLiveKitCall(params: {
       const sender: 'user' | 'kallie' = isLocal ? 'user' : 'kallie';
 
       let accumulated = '';
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+      let lastEmitAt = 0;
+      const scheduleFlush = () => {
+        const now = Date.now();
+        if (now - lastEmitAt >= 75) {
+          lastEmitAt = now;
+          upsertMessage(canonicalId, sender, accumulated, ts, false);
+          return;
+        }
+        if (!flushTimer) {
+          flushTimer = setTimeout(() => {
+            flushTimer = null;
+            if (!cancelled && accumulated.trim()) {
+              lastEmitAt = Date.now();
+              upsertMessage(canonicalId, sender, accumulated, ts, false);
+            }
+          }, 75);
+        }
+      };
+
       try {
         for await (const chunk of reader) {
           if (cancelled) break;
           accumulated += chunk;
-          upsertMessage(canonicalId, sender, accumulated, ts, false);
+          scheduleFlush();
+        }
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
         }
         if (!cancelled && accumulated.trim()) {
           upsertMessage(canonicalId, sender, accumulated, ts, isFinal);
         }
       } catch {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
+        }
         // Ignore stream close errors on disconnect
       }
     };
@@ -736,7 +768,7 @@ export function useLiveKitCall(params: {
     agentReady,
     connectionStatus,
     audioLevel,
-    elapsedSeconds,
+    elapsedSeconds: 0,
     messages,
     toggleMute,
     toggleCamera,

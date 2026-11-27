@@ -1,6 +1,16 @@
+import {
+  ActivityHandling,
+  Behavior,
+  EndSensitivity,
+  FunctionResponseScheduling,
+  StartSensitivity,
+  type ContextWindowCompressionConfig,
+  type RealtimeInputConfig,
+} from '@google/genai';
 import { type JobContext, voice } from '@livekit/agents';
 import * as google from '@livekit/agents-plugin-google';
 import { createKallieScheduleTools } from './scheduleTools.js';
+import { SileroSpeechGateProcessor } from './speechGate.js';
 import {
   markCallInProgress,
   saveCallTranscript,
@@ -29,7 +39,7 @@ const DEFAULT_GIRLFRIEND_PERSONA = [
   '- Warm, expressive, gently teasing, supportive, and attentive — like a real loving girlfriend on a phone call.',
   '- Use natural terms of endearment lightly and tastefully (like "babe", "love", or "mahal" when speaking Taglish), without overdoing it.',
   '- Match the user\'s language naturally: if they speak Tagalog or Taglish, reply in natural conversational Taglish; if they speak English, reply in natural warm English.',
-  '- Speak like a real phone call: short, natural spoken sentences, never robotic, never use markdown or bullet lists.',
+  '- Speak like a real phone call: keep replies crisp and natural (1 to 2 short spoken sentences unless they ask for details), never robotic, never use markdown or bullet lists.',
   'Dynamic Voice Scheduling & Reminders:',
   '- You manage calls and reminders dynamically through voice tools: `schedule_callback`, `list_scheduled_calls`, `cancel_scheduled_call`, and `end_call`.',
   '- Whenever the user says things like "Call me at 8 PM", "Call me back in 2 minutes", "Remind me about something at 9:30", or "Call me back tomorrow at 9 AM", immediately call `schedule_callback` and confirm the saved time warmly.',
@@ -71,6 +81,50 @@ export function resolveThinkingConfig(
   const level = VALID_THINKING_LEVELS.has(normalizedLevel) ? normalizedLevel : 'MINIMAL';
   return {
     thinkingLevel: level as 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH',
+  };
+}
+
+const DEFAULT_VAD_SILENCE_MS = 320;
+const MIN_VAD_SILENCE_MS = 220;
+const MAX_VAD_SILENCE_MS = 800;
+
+/**
+ * Configures Gemini Live server-side VAD for consistently fast, natural turn-taking.
+ * Paired with `SileroSpeechGateProcessor` (150ms hangover), `START_SENSITIVITY_LOW`
+ * suppresses mic clicks/noise false triggers while `END_SENSITIVITY_HIGH` + 320ms
+ * silence closes turns crisply without cutting off mid-sentence pauses/commas.
+ */
+export function resolveRealtimeInputConfig(
+  envSilenceMs = process.env.GEMINI_VAD_SILENCE_MS,
+): RealtimeInputConfig {
+  const parsedSilence = envSilenceMs ? Number.parseInt(envSilenceMs, 10) : Number.NaN;
+  const silenceDurationMs = Number.isFinite(parsedSilence)
+    ? Math.max(MIN_VAD_SILENCE_MS, Math.min(MAX_VAD_SILENCE_MS, parsedSilence))
+    : DEFAULT_VAD_SILENCE_MS;
+
+  return {
+    automaticActivityDetection: {
+      disabled: false,
+      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+      endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+      prefixPaddingMs: 120,
+      silenceDurationMs,
+    },
+    activityHandling: ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
+  };
+}
+
+/**
+ * Prevents unbounded audio-token context growth over multi-minute voice calls
+ * (which otherwise increases prefill TTFB on later turns). Uses a wide 6k-token
+ * stride between trigger and target so compression runs rarely, not every turn.
+ */
+export function resolveContextWindowCompression(): ContextWindowCompressionConfig {
+  return {
+    triggerTokens: '12000',
+    slidingWindow: {
+      targetTokens: '6000',
+    },
   };
 }
 
@@ -190,20 +244,28 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
     process.env.GEMINI_REALTIME_MODEL || 'gemini-3.1-flash-live-preview';
   const supportsAffectiveDialog = selectedModel.startsWith('gemini-2.5-');
   const thinkingConfig = resolveThinkingConfig(selectedModel);
+  const realtimeInputConfig = resolveRealtimeInputConfig();
+  const contextWindowCompression = resolveContextWindowCompression();
+  const speechGate = new SileroSpeechGateProcessor({ hangoverMs: 150 });
 
   const model = new google.realtime.RealtimeModel({
     model: selectedModel,
     voice: selectedVoice,
     instructions,
     apiKey: process.env.GOOGLE_API_KEY,
+    realtimeInputConfig,
+    contextWindowCompression,
+    toolBehavior: Behavior.NON_BLOCKING,
+    toolResponseScheduling: FunctionResponseScheduling.WHEN_IDLE,
     ...(supportsAffectiveDialog ? { enableAffectiveDialog: true } : {}),
     ...(thinkingConfig ? { thinkingConfig: thinkingConfig as never } : {}),
   });
 
   const session = new voice.AgentSession({
     llm: model,
-    // Gemini Live runs server-side VAD & turn detection; skip unused local models
+    // Gemini Live runs server-side VAD fed by SileroSpeechGateProcessor
     vad: null,
+    aecWarmupDuration: 0,
     turnHandling: {
       turnDetection: 'realtime_llm',
     },
@@ -213,6 +275,7 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
   let callActivated = !isStandby;
   let activatedAtMs: number | null = null;
   let loggedFirstSpeaking = false;
+  let turnCounter = 0;
 
   session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
     if (!loggedFirstSpeaking && event.newState === 'speaking') {
@@ -223,6 +286,18 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
         `[KalliePerf] session=${sessionTag} firstSpeaking=${msSinceStart()}ms${fromAct}`,
       );
     }
+  });
+
+  session.on(voice.AgentSessionEventTypes.MetricsCollected, (event) => {
+    const metrics = event.metrics;
+    if (metrics.type !== 'realtime_model_metrics') {
+      return;
+    }
+    turnCounter += 1;
+    const rssMB = Math.round(process.memoryUsage().rss / (1024 * 1024));
+    console.log(
+      `[KallieTurnPerf] session=${sessionTag} turn=${turnCounter} ttftMs=${Math.round(metrics.ttftMs)} durMs=${Math.round(metrics.durationMs)} inTok=${metrics.inputTokens} outTok=${metrics.outputTokens} thinkTok=${metrics.reasoningTokens ?? 0} cachedTok=${metrics.inputTokenDetails?.cachedTokens ?? 0} rssMB=${rssMB}`,
+    );
   });
 
   session.on(voice.AgentSessionEventTypes.ConversationItemAdded, (event) => {
@@ -252,6 +327,7 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
     if (hangupTimer) {
       clearTimeout(hangupTimer);
     }
+    speechGate.close();
     if (callActivated && metadata.sessionId) {
       await saveCallTranscript(metadata.sessionId, transcript);
     }
@@ -274,6 +350,16 @@ export async function runKallieVoiceSession(ctx: JobContext): Promise<void> {
   await session.start({
     agent,
     room: ctx.room,
+    inputOptions: {
+      // Match Gemini Live's native 16kHz mono PCM directly (eliminates 48k -> 24k -> 16k double resampling)
+      audioSampleRate: 16_000,
+      audioNumChannels: 1,
+      noiseCancellation: speechGate,
+    },
+    outputOptions: {
+      // Emit transcript deltas immediately without playback-sync pacing overhead
+      syncTranscription: false,
+    },
   });
   const sessionStartedMs = msSinceStart();
 
