@@ -168,15 +168,16 @@ export function ActiveCallView({
       ? 'connecting'
       : agentState;
 
-  const effectiveConnectionStatus: AuraConnectionStatus = error
-    ? 'disconnected'
-    : !isSessionActive
-      ? 'idle'
-      : connectionStatus === 'weak' || connectionStatus === 'disconnected'
-        ? connectionStatus
-        : !isCallReady || status === 'connecting'
-          ? 'connecting'
-          : 'connected';
+  const effectiveConnectionStatus: AuraConnectionStatus =
+    error || connectionStatus === 'disconnected'
+      ? 'disconnected'
+      : connectionStatus === 'weak'
+        ? 'weak'
+        : !isSessionActive
+          ? 'idle'
+          : !isCallReady || status === 'connecting'
+            ? 'connecting'
+            : 'connected';
 
   const isConnected = status === 'connected' || status === 'agent_speaking';
 
@@ -315,10 +316,20 @@ export function ActiveCallView({
             ]}
             pointerEvents="none"
           >
-            <Text style={styles.promptText}>
-              {microphoneMissing
-                ? 'Tap Aura to allow microphone & talk.'
-                : 'Tap Aura to talk.'}
+            <Text
+              style={[
+                styles.promptText,
+                effectiveConnectionStatus === 'disconnected' && styles.promptTextOffline,
+                effectiveConnectionStatus === 'weak' && styles.promptTextWeak,
+              ]}
+            >
+              {effectiveConnectionStatus === 'disconnected'
+                ? 'No internet connection.'
+                : effectiveConnectionStatus === 'weak'
+                  ? 'Weak connection. Tap Aura to talk.'
+                  : microphoneMissing
+                    ? 'Tap Aura to allow microphone & talk.'
+                    : 'Tap Aura to talk.'}
             </Text>
           </Animated.View>
 
@@ -544,6 +555,12 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     letterSpacing: -0.1,
     textAlign: 'center',
+  },
+  promptTextOffline: {
+    color: '#F87171',
+  },
+  promptTextWeak: {
+    color: '#FACC15',
   },
   errorText: {
     position: 'absolute',

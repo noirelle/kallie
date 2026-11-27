@@ -23,6 +23,10 @@ import {
   subscribeAuthSession,
 } from '../../../lib/storage/authSessionCache';
 import { JoinCallResponse } from '../../../types/database';
+import {
+  NetworkQuality,
+  useNetworkQuality,
+} from '../../network/hooks/useNetworkQuality';
 import { syncUserData } from '../../schedules/lib/syncEngine';
 import {
   AgentVisualizerState,
@@ -61,6 +65,7 @@ interface ActiveCallContextValue extends ActiveCallActionsValue {
   agentState: AgentVisualizerState;
   agentReady: boolean;
   connectionStatus: AuraConnectionStatus;
+  networkQuality: NetworkQuality;
   error: string | null;
   isMuted: boolean;
   isCameraOn: boolean;
@@ -79,6 +84,7 @@ const ActiveCallContext = createContext<ActiveCallContextValue | null>(null);
 
 export function ActiveCallProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const network = useNetworkQuality();
   const [sessionActive, setSessionActive] = useState(false);
   const [connection, setConnection] = useState<JoinCallResponse | null>(null);
   const [activeStandby, setActiveStandby] = useState<StagedStandbySession | null>(null);
@@ -95,10 +101,30 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
   const inFlightAcceptSessionRef = useRef<string | null>(null);
   const sessionActiveRef = useRef(false);
   const signedInUserIdRef = useRef<string | null>(signedInUserId);
+  const prevNetworkQualityRef = useRef<NetworkQuality>(network.quality);
+  const networkRef = useRef(network);
+  networkRef.current = network;
 
   activeSessionIdRef.current = connection?.session.id ?? null;
   sessionActiveRef.current = sessionActive;
   signedInUserIdRef.current = signedInUserId;
+
+  // Automatically re-warm standby & sync data the moment internet recovers from offline
+  useEffect(() => {
+    const prev = prevNetworkQualityRef.current;
+    prevNetworkQualityRef.current = network.quality;
+    if (prev === 'disconnected' && network.quality !== 'disconnected') {
+      setStartError(null);
+      prewarmCallInfrastructure(true);
+      const uid = signedInUserIdRef.current;
+      if (uid) {
+        void syncUserData(uid, { force: true });
+        if (!sessionActiveRef.current && AppState.currentState === 'active') {
+          void stageStandbySession();
+        }
+      }
+    }
+  }, [network.quality]);
 
   // Share the single authSessionCache listener so standby pre-staging only runs when signed in
   useEffect(() => {
@@ -224,6 +250,15 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       setStartError(null);
       redirectToPermissions('call_microphone');
       return;
+    }
+
+    // If currently offline, trigger an immediate probe; if still offline, stay idle
+    // with the red Aura instead of hanging on a doomed network request.
+    if (networkRef.current.quality === 'disconnected') {
+      const fresh = await networkRef.current.checkNow();
+      if (fresh.quality === 'disconnected') {
+        return;
+      }
     }
 
     const attemptId = ++attemptIdRef.current;
@@ -466,6 +501,25 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
     ],
   );
 
+  const mergedConnectionStatus: AuraConnectionStatus = useMemo(() => {
+    if (network.quality === 'disconnected' || startError) {
+      return 'disconnected';
+    }
+    if (sessionActive) {
+      if (livekit.connectionStatus === 'disconnected') {
+        return 'disconnected';
+      }
+      if (network.quality === 'weak' || livekit.connectionStatus === 'weak') {
+        return 'weak';
+      }
+      return livekit.connectionStatus;
+    }
+    if (network.quality === 'weak') {
+      return 'weak';
+    }
+    return 'idle';
+  }, [livekit.connectionStatus, network.quality, sessionActive, startError]);
+
   const value = useMemo<ActiveCallContextValue>(
     () => ({
       ...actionsValue,
@@ -473,7 +527,8 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       status: livekit.status,
       agentState: livekit.agentState,
       agentReady: livekit.agentReady,
-      connectionStatus: startError ? 'disconnected' : livekit.connectionStatus,
+      connectionStatus: mergedConnectionStatus,
+      networkQuality: network.quality,
       error: startError ?? livekit.error,
       isMuted: livekit.isMuted,
       isCameraOn: livekit.isCameraOn,
@@ -492,7 +547,6 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       livekit.agentReady,
       livekit.agentState,
       livekit.audioLevel,
-      livekit.connectionStatus,
       livekit.elapsedSeconds,
       livekit.error,
       livekit.isCameraOn,
@@ -504,6 +558,8 @@ export function ActiveCallProvider({ children }: { children: ReactNode }) {
       livekit.toggleCamera,
       livekit.toggleMute,
       livekit.toggleScreenShare,
+      mergedConnectionStatus,
+      network.quality,
       startError,
     ],
   );

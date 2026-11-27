@@ -12,6 +12,7 @@ import { Platform } from 'react-native';
 import { AuraConnectionStatus } from '../../../components/auraTheme';
 import { apiClient } from '../../../lib/apiClient';
 import { clearPendingCallConnection } from '../../../lib/callSessionStore';
+import { networkMonitor } from '../../network/lib/networkMonitor';
 import { permissionManager } from '../../permissions/lib/permissionManager';
 import {
   getCachedRegionalLiveKitUrl,
@@ -332,25 +333,30 @@ export function useLiveKitCall(params: {
       if (participant.identity !== room.localParticipant.identity) return;
       if (quality === ConnectionQuality.Lost) {
         setConnectionStatus('disconnected');
+        networkMonitor.notifyTransportEvent('dropped');
       } else if (quality === ConnectionQuality.Poor) {
         setConnectionStatus('weak');
+        networkMonitor.notifyTransportEvent('weak');
       } else if (
         (quality === ConnectionQuality.Good || quality === ConnectionQuality.Excellent) &&
         wasConnectedRef.current
       ) {
         setConnectionStatus('connected');
+        networkMonitor.notifyTransportEvent('connected');
       }
     });
 
     room.on(RoomEvent.Reconnecting, () => {
       if (!cancelled) {
         setConnectionStatus('weak');
+        networkMonitor.notifyTransportEvent('dropped');
       }
     });
 
     room.on(RoomEvent.Reconnected, () => {
       if (!cancelled) {
         setConnectionStatus('connected');
+        networkMonitor.notifyTransportEvent('connected');
       }
     });
 
@@ -450,6 +456,9 @@ export function useLiveKitCall(params: {
       if (cancelled) return;
       setStatus('disconnected');
       setConnectionStatus(endedManuallyRef.current ? 'idle' : 'disconnected');
+      if (!endedManuallyRef.current) {
+        networkMonitor.notifyTransportEvent('dropped');
+      }
       // Only auto-leave screen if the call actually connected before disconnecting
       if (wasConnectedRef.current && !endedManuallyRef.current) {
         clearPendingCallConnection(params.sessionId);

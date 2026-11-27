@@ -1,6 +1,7 @@
 import { cacheManager } from '../../../lib/cache/cacheManager';
 import { supabase } from '../../../lib/supabaseClient';
 import { CallSchedule, CallSession } from '../../../types/database';
+import { networkMonitor } from '../../network/lib/networkMonitor';
 import { applyServerSessions } from './callHistoryRepository';
 import {
   applyServerSchedules,
@@ -282,7 +283,13 @@ export function startRealtimeSync(userId: string): () => void {
         }
       },
     )
-    .subscribe();
+    .subscribe((status) => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        networkMonitor.notifyTransportEvent('dropped');
+      } else if (status === 'SUBSCRIBED') {
+        networkMonitor.notifyTransportEvent('connected');
+      }
+    });
 
   return () => {
     void supabase.removeChannel(channel);

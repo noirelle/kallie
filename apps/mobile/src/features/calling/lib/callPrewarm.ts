@@ -11,6 +11,7 @@ import { apiClient } from '../../../lib/apiClient';
 import { cacheManager } from '../../../lib/cache/cacheManager';
 import { appEnv } from '../../../lib/env';
 import { JoinCallResponse } from '../../../types/database';
+import { networkMonitor } from '../../network/lib/networkMonitor';
 import { permissionManager } from '../../permissions/lib/permissionManager';
 
 export type LiveKitNativeModule = {
@@ -311,6 +312,9 @@ export async function stageStandbySession(): Promise<StagedStandbySession | null
 
       const onStandbyDisconnected = () => {
         connected = false;
+        if (!entry.disposed) {
+          networkMonitor.notifyTransportEvent('dropped');
+        }
         if (stagedStandby === entry) {
           stagedStandby = null;
           clearStandbyTimer();
