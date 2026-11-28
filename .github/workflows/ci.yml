@@ -1,4 +1,4 @@
-name: CI — Build & Test
+name: CI — Build & Verify
 
 on:
   push:
@@ -9,54 +9,8 @@ on:
       - main
 
 jobs:
-  infra:
-    name: Infra Preflight & Compose Validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm run test:infra
-      - name: Validate docker-compose.yml syntax
-        run: |
-          cp infra/.env.prod.example .env
-          cp services/api/.env.example services/api/.env
-          cp services/agent/.env.example services/agent/.env
-          cp apps/web/.env.example apps/web/.env.local
-          docker compose config -q
-
-  api:
-    name: API Build & Unit Tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/api
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm ci
-      - run: npm test
-
-  agent:
-    name: Voice Agent Build & Unit Tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/agent
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm ci
-      - run: npm run build
-      - run: npm test
-
   web:
-    name: Web Client Typecheck & Build
+    name: Web Landing Page Typecheck & Static Export
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -69,10 +23,6 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
-          NEXT_PUBLIC_API_URL: https://api.example.com
 
   mobile:
     name: Mobile Client Typecheck
@@ -87,3 +37,17 @@ jobs:
           node-version: 22
       - run: npm ci --legacy-peer-deps
       - run: npm run typecheck
+
+  bridge:
+    name: Desktop Bridge Build & Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test

@@ -1,4 +1,5 @@
-import { Slot, useRootNavigationState, useRouter, useSegments } from 'expo-router';
+import { useFonts } from 'expo-font';
+import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { Component, ReactNode, useCallback, useEffect } from 'react';
 import {
@@ -11,53 +12,33 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { scheduleAfterPaint } from '../src/lib/scheduleAfterPaint';
-import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { IncomingCallModal } from '../src/features/calling/components/IncomingCallModal';
 import {
   ActiveCallProvider,
   useActiveCallActions,
 } from '../src/features/calling/context/ActiveCallContext';
 import { useIncomingCall } from '../src/features/calling/hooks/useIncomingCall';
+import { nativeIncomingCall } from '../src/features/calling/lib/nativeIncomingCall';
 import {
-  registerBackgroundFcmHandler,
-  useNativeCallKeep,
-} from '../src/features/calling/hooks/useNativeCallKeep';
-import { useAuraGuide } from '../src/features/onboarding/hooks/useAuraGuide';
+  OnboardingFlow,
+  OnboardingIntent,
+} from '../src/features/onboarding/components/OnboardingFlow';
+import { startOpenRouterOAuth } from '../src/features/ai/lib/openRouterAuth';
 import { useOnboardingPermissions } from '../src/features/onboarding/hooks/useOnboardingPermissions';
 import { permissionManager } from '../src/features/permissions/lib/permissionManager';
+import { syncLocalAlarms } from '../src/features/schedules/lib/schedulesRepository';
 import { AppUpdateBanner } from '../src/features/updates/components/AppUpdateBanner';
 import { useAutoUpdate } from '../src/features/updates/hooks/useAutoUpdate';
-import { startRealtimeSync, syncUserData } from '../src/features/schedules/lib/syncEngine';
+import { scheduleAfterPaint } from '../src/lib/scheduleAfterPaint';
+import { hydrateLocalInstallationId } from '../src/lib/storage/localIdentity';
+import { MONO, TYPE } from '../src/theme/monoTheme';
 
-// Register Android killed/background FCM handler once at module load (required by RNFB).
-// LiveKit native globals are initialized lazily post-first-paint by ActiveCallProvider.
-registerBackgroundFcmHandler();
-
-let cachedOnboardingFlow:
-  | typeof import('../src/features/onboarding/components/OnboardingFlow').OnboardingFlow
-  | null = null;
-let cachedAuraGuideSlider:
-  | typeof import('../src/features/onboarding/components/AuraGuideSlider').AuraGuideSlider
-  | null = null;
-
-function getOnboardingFlowComponent() {
-  if (!cachedOnboardingFlow) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('../src/features/onboarding/components/OnboardingFlow') as typeof import('../src/features/onboarding/components/OnboardingFlow');
-    cachedOnboardingFlow = mod.OnboardingFlow;
-  }
-  return cachedOnboardingFlow;
-}
-
-function getAuraGuideSliderComponent() {
-  if (!cachedAuraGuideSlider) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('../src/features/onboarding/components/AuraGuideSlider') as typeof import('../src/features/onboarding/components/AuraGuideSlider');
-    cachedAuraGuideSlider = mod.AuraGuideSlider;
-  }
-  return cachedAuraGuideSlider;
-}
+const FONT_ASSETS = {
+  Geist_400Regular: require('@expo-google-fonts/geist/400Regular/Geist_400Regular.ttf'),
+  Geist_500Medium: require('@expo-google-fonts/geist/500Medium/Geist_500Medium.ttf'),
+  Geist_600SemiBold: require('@expo-google-fonts/geist/600SemiBold/Geist_600SemiBold.ttf'),
+  GeistMono_400Regular: require('@expo-google-fonts/geist-mono/400Regular/GeistMono_400Regular.ttf'),
+};
 
 class AppErrorBoundary extends Component<
   { children: ReactNode },
@@ -89,9 +70,8 @@ class AppErrorBoundary extends Component<
 }
 
 function RootLayoutContent() {
-  const { user, loading } = useAuth();
+  const [fontsLoaded, fontError] = useFonts(FONT_ASSETS);
   const onboarding = useOnboardingPermissions();
-  const auraGuide = useAuraGuide(user?.id);
   const segments = useSegments();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
@@ -99,6 +79,7 @@ function RootLayoutContent() {
   const activeCall = useActiveCallActions();
 
   const isNavReady = Boolean(rootNavigationState?.key);
+  const fontsReady = fontsLoaded || Boolean(fontError);
 
   const openAuraHome = useCallback(() => {
     if (!isNavReady) return;
@@ -107,20 +88,16 @@ function RootLayoutContent() {
     }
   }, [isNavReady, router, segments]);
 
-  const handleAnswerSession = useCallback(
-    async (sessionId: string, options: { openUi: boolean }) => {
-      if (options.openUi) {
+  const handleStartScheduledCallback = useCallback(
+    async (payload: { title: string; aiPrompt: string; openUi: boolean }) => {
+      if (payload.openUi) {
         openAuraHome();
       }
-      return activeCall.joinSessionById(sessionId);
-    },
-    [activeCall, openAuraHome],
-  );
-
-  const handleNativeAccepted = useCallback(
-    (sessionId: string) => {
-      openAuraHome();
-      void activeCall.joinSessionById(sessionId);
+      return activeCall.startImmediateCall({
+        title: payload.title,
+        aiPrompt: payload.aiPrompt,
+        isScheduledCallback: true,
+      });
     },
     [activeCall, openAuraHome],
   );
@@ -128,141 +105,82 @@ function RootLayoutContent() {
   const {
     incomingSession,
     processing,
-    presentForegroundPush,
-    dismissSession,
     acceptIncomingCall,
     declineIncomingCall,
-  } = useIncomingCall(user?.id, {
+  } = useIncomingCall({
     activeSessionId: activeCall.activeSessionId,
-    onAnswerSession: handleAnswerSession,
+    onStartScheduledCallback: handleStartScheduledCallback,
     onOpenActiveCall: openAuraHome,
     onHangUpSession: activeCall.endActiveCall,
   });
-
-  useNativeCallKeep(user?.id, handleNativeAccepted, onboarding.completed, {
-    onForegroundIncomingCall: presentForegroundPush,
-    onForegroundCallEnded: dismissSession,
-  });
-
-  const isBooting = loading || !onboarding.hydrated || (Boolean(user) && !auraGuide.hydrated);
-  const inAuthGroup = segments[0] === '(auth)';
-  const needsAuthRedirect =
-    !isBooting && isNavReady && ((!user && !inAuthGroup) || (Boolean(user) && inAuthGroup));
-  const showOnboarding = onboarding.hydrated && !onboarding.completed;
-  const showAuraGuide =
-    !showOnboarding && Boolean(user) && auraGuide.hydrated && !auraGuide.completed;
-  const showBootOverlay =
-    isBooting || !isNavReady || (!showOnboarding && !showAuraGuide && needsAuthRedirect);
 
   useEffect(() => {
     const enforceHiddenStatusBar = () => {
       RNStatusBar.setHidden(true, 'fade');
     };
     enforceHiddenStatusBar();
-    // Silently keep permission state synchronized (detecting revocations in Settings)
-    // without ever displaying an unprompted OS permission dialog on boot or resume.
-    const cancelPermSync = scheduleAfterPaint(() => {
+
+    const cancelInit = scheduleAfterPaint(() => {
+      nativeIncomingCall.ensureChannels();
+      void hydrateLocalInstallationId();
+      syncLocalAlarms();
       void permissionManager.refreshAll();
     });
+
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         enforceHiddenStatusBar();
+        syncLocalAlarms();
         void permissionManager.refreshAll();
       }
     });
+
     return () => {
-      cancelPermSync();
+      cancelInit();
       sub.remove();
     };
   }, []);
 
-  // Keep local SQLite schedules & call history synchronized via 1 unified Realtime channel + delta pull.
-  // Deferred past initial frame paint so Home Aura renders with zero boot contention.
-  useEffect(() => {
-    const uid = user?.id;
-    if (!uid) return;
-
-    let stopRealtime: (() => void) | null = null;
-    const cancelDeferred = scheduleAfterPaint(() => {
-      stopRealtime = startRealtimeSync(uid);
-      void syncUserData(uid);
-    });
-
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        void syncUserData(uid);
-      }
-    });
-
-    return () => {
-      cancelDeferred();
-      stopRealtime?.();
-      sub.remove();
-    };
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (isBooting || !isNavReady) return;
-
-    if (!user && !inAuthGroup) {
-      router.replace('/(auth)/login');
-    } else if (user && inAuthGroup) {
-      router.replace('/');
-    }
-  }, [inAuthGroup, isBooting, isNavReady, router, user]);
-
-  const handleAccept = async () => {
-    await acceptIncomingCall();
-  };
-
   const handleCompleteOnboarding = useCallback(
-    async (intent: 'signup' | 'login') => {
+    async (intent: OnboardingIntent) => {
       await onboarding.completeOnboarding();
-      if (!user && isNavReady) {
-        router.replace(intent === 'signup' ? '/(auth)/register' : '/(auth)/login');
+      if (!isNavReady) return;
+      if (intent === 'openrouter_oauth') {
+        await startOpenRouterOAuth().catch(() => {
+          router.push('/settings');
+        });
+      } else if (intent === 'pair_desktop') {
+        router.push('/settings?tab=desktop');
+      } else if (intent === 'setup_provider') {
+        router.push('/settings');
       }
     },
-    [isNavReady, onboarding, router, user],
+    [isNavReady, onboarding, router],
   );
+
+  const isDeepLinkOnboardingBypass =
+    segments[0] === 'pair' || segments[0] === 'oauth';
+  const showOnboarding =
+    onboarding.hydrated && !onboarding.completed && !isDeepLinkOnboardingBypass;
+  const showBootOverlay = !fontsReady || !onboarding.hydrated || !isNavReady;
 
   return (
     <View style={styles.root}>
       <StatusBar style="light" hidden animated />
-      <Slot />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: '#000000' },
+          animation: 'fade',
+          animationDuration: 200,
+        }}
+      />
 
-      {showOnboarding
-        ? (() => {
-            const OnboardingFlowComp = getOnboardingFlowComponent();
-            return (
-              <View style={styles.fullOverlay}>
-                <OnboardingFlowComp
-                  discoverySource={onboarding.discoverySource}
-                  onSelectDiscovery={onboarding.setDiscoverySource}
-                  interests={onboarding.interests}
-                  onToggleInterest={onboarding.toggleInterest}
-                  permissions={onboarding.permissions}
-                  busyKey={onboarding.busyKey}
-                  showFullScreenIntentToggle={onboarding.supportsFullScreenIntentToggle}
-                  onToggleNotifications={onboarding.toggleNotifications}
-                  onToggleMicrophone={onboarding.toggleMicrophone}
-                  onToggleFullScreenIntent={onboarding.toggleFullScreenIntent}
-                  onComplete={handleCompleteOnboarding}
-                />
-              </View>
-            );
-          })()
-        : null}
-
-      {showAuraGuide
-        ? (() => {
-            const AuraGuideSliderComp = getAuraGuideSliderComponent();
-            return (
-              <View style={styles.fullOverlay}>
-                <AuraGuideSliderComp onComplete={auraGuide.completeGuide} />
-              </View>
-            );
-          })()
-        : null}
+      {showOnboarding ? (
+        <View style={styles.fullOverlay}>
+          <OnboardingFlow onComplete={handleCompleteOnboarding} />
+        </View>
+      ) : null}
 
       {showBootOverlay ? (
         <View style={styles.loaderOverlay}>
@@ -278,8 +196,8 @@ function RootLayoutContent() {
       <IncomingCallModal
         session={incomingSession}
         processing={processing}
-        onAccept={handleAccept}
-        onDecline={declineIncomingCall}
+        onAccept={() => void acceptIncomingCall()}
+        onDecline={() => void declineIncomingCall()}
       />
     </View>
   );
@@ -330,26 +248,24 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   errorTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
+    ...TYPE.heading,
+    color: MONO.textPrimary,
     marginBottom: 8,
   },
   errorDetail: {
-    color: '#A1A1AA',
-    fontSize: 12,
+    ...TYPE.caption,
+    color: MONO.textSecondary,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 22,
   },
   retryBtn: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: MONO.white,
     borderRadius: 999,
     paddingHorizontal: 24,
     paddingVertical: 12,
   },
   retryBtnText: {
-    color: '#000000',
-    fontSize: 14,
-    fontWeight: '600',
+    ...TYPE.button,
+    color: MONO.black,
   },
 });

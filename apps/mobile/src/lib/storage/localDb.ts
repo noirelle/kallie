@@ -3,7 +3,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { Platform } from 'react-native';
 
 const DB_NAME = 'kallie.db';
-const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export interface CacheEntryRow {
   cache_key: string;
@@ -21,7 +21,7 @@ PRAGMA synchronous = NORMAL;
 
 CREATE TABLE IF NOT EXISTS local_call_schedules (
   id TEXT PRIMARY KEY NOT NULL,
-  user_id TEXT NOT NULL,
+  user_id TEXT NOT NULL DEFAULT 'local',
   title TEXT NOT NULL,
   ai_prompt TEXT NOT NULL,
   scheduled_at TEXT NOT NULL,
@@ -33,23 +33,19 @@ CREATE TABLE IF NOT EXISTS local_call_schedules (
   reminder_sent_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  sync_state TEXT NOT NULL DEFAULT 'synced',
+  sync_state TEXT NOT NULL DEFAULT 'local',
   deleted_locally INTEGER NOT NULL DEFAULT 0,
   last_synced_at TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_local_schedules_user_active
-  ON local_call_schedules (user_id, status, next_run_at ASC)
+CREATE INDEX IF NOT EXISTS idx_local_schedules_active
+  ON local_call_schedules (status, next_run_at ASC)
   WHERE deleted_locally = 0;
-
-CREATE INDEX IF NOT EXISTS idx_local_schedules_sync
-  ON local_call_schedules (sync_state)
-  WHERE sync_state != 'synced';
 
 CREATE TABLE IF NOT EXISTS local_call_sessions (
   id TEXT PRIMARY KEY NOT NULL,
   schedule_id TEXT,
-  user_id TEXT NOT NULL,
+  user_id TEXT NOT NULL DEFAULT 'local',
   room_name TEXT NOT NULL,
   title TEXT NOT NULL,
   ai_prompt TEXT NOT NULL,
@@ -62,25 +58,8 @@ CREATE TABLE IF NOT EXISTS local_call_sessions (
   updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_local_sessions_user_created
-  ON local_call_sessions (user_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS sync_outbox (
-  id TEXT PRIMARY KEY NOT NULL,
-  user_id TEXT NOT NULL,
-  entity_type TEXT NOT NULL,
-  entity_id TEXT NOT NULL,
-  operation TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  base_updated_at TEXT,
-  attempts INTEGER NOT NULL DEFAULT 0,
-  next_retry_at INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT,
-  created_at INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_sync_outbox_pending
-  ON sync_outbox (user_id, next_retry_at ASC);
+CREATE INDEX IF NOT EXISTS idx_local_sessions_created
+  ON local_call_sessions (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS cache_entries (
   cache_key TEXT PRIMARY KEY NOT NULL,
@@ -104,11 +83,127 @@ CREATE TABLE IF NOT EXISTS local_reminder_ledger (
 );
 `;
 
+const SCHEMA_V2_SQL = `
+DROP TABLE IF EXISTS sync_outbox;
+
+UPDATE local_call_schedules SET user_id = 'local', sync_state = 'local' WHERE user_id != 'local';
+UPDATE local_call_sessions SET user_id = 'local' WHERE user_id != 'local';
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY NOT NULL,
+  value_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_providers (
+  id TEXT PRIMARY KEY NOT NULL,
+  provider_type TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  base_url TEXT,
+  default_model TEXT NOT NULL,
+  embedding_model TEXT,
+  extra_headers_json TEXT NOT NULL DEFAULT '{}',
+  capabilities_json TEXT NOT NULL DEFAULT '{}',
+  is_active INTEGER NOT NULL DEFAULT 0,
+  secret_key_ref TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY NOT NULL,
+  title TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'chat',
+  provider_id TEXT,
+  model_id TEXT,
+  summary TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  archived_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_updated
+  ON conversations (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY NOT NULL,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tool_calls_json TEXT,
+  tool_call_id TEXT,
+  token_usage_json TEXT,
+  source TEXT NOT NULL DEFAULT 'text',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation
+  ON messages (conversation_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS tool_permissions (
+  tool_id TEXT PRIMARY KEY NOT NULL,
+  policy TEXT NOT NULL DEFAULT 'ask',
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS automation_runs (
+  id TEXT PRIMARY KEY NOT NULL,
+  tool_id TEXT NOT NULL,
+  conversation_id TEXT,
+  input_json TEXT NOT NULL,
+  output_json TEXT,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`;
+
+const SCHEMA_V3_MEMORY_SQL = `
+CREATE TABLE IF NOT EXISTS memories (
+  id TEXT PRIMARY KEY NOT NULL,
+  memory_type TEXT NOT NULL,
+  content TEXT NOT NULL,
+  normalized_hash TEXT NOT NULL,
+  entities_json TEXT NOT NULL DEFAULT '[]',
+  source_conversation_id TEXT,
+  confidence REAL NOT NULL DEFAULT 0.75,
+  importance REAL NOT NULL DEFAULT 0.5,
+  reinforcement_count INTEGER NOT NULL DEFAULT 1,
+  last_accessed_at TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  superseded_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memories_status_updated
+  ON memories (status, pinned DESC, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_memories_hash
+  ON memories (normalized_hash);
+
+CREATE TABLE IF NOT EXISTS memory_embeddings (
+  memory_id TEXT PRIMARY KEY NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  embedding_provider TEXT NOT NULL,
+  embedding_model TEXT NOT NULL,
+  dimensions INTEGER NOT NULL,
+  vector_blob BLOB NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`;
+
+const SCHEMA_V3_FTS_SQL = `
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+  memory_id UNINDEXED,
+  content,
+  entities_text
+);
+`;
+
 let dbInstance: SQLiteDatabase | null = null;
 let dbInitAttempted = false;
+let ftsAvailable = false;
 
-// Graceful in-memory fallback when running on web or an older dev binary
-// that has not yet been rebuilt with expo-sqlite native bindings.
 const fallbackPrefs = new Map<string, string>();
 const fallbackCache = new Map<string, CacheEntryRow>();
 const fallbackReminderLedger = new Map<string, number>();
@@ -117,8 +212,6 @@ function openAndMigrateSqlite(): SQLiteDatabase | null {
   if (Platform.OS === 'web') {
     return null;
   }
-  // Check optional native module first so older un-rebuilt dev APKs degrade cleanly
-  // without triggering a React Native Dev RedBox exception.
   if (!requireOptionalNativeModule('ExpoSQLite')) {
     return null;
   }
@@ -129,14 +222,45 @@ function openAndMigrateSqlite(): SQLiteDatabase | null {
       return null;
     }
     const db = SQLite.openDatabaseSync(DB_NAME);
-    const versionRow = db.getFirstSync<{ user_version: number }>('PRAGMA user_version');
-    const currentVersion = versionRow?.user_version ?? 0;
+    db.execSync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;');
 
-    if (currentVersion < CURRENT_SCHEMA_VERSION) {
+    const versionRow = db.getFirstSync<{ user_version: number }>('PRAGMA user_version');
+    let version = versionRow?.user_version ?? 0;
+
+    if (version < 1) {
       db.execSync(SCHEMA_V1_SQL);
-      db.execSync(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
+      version = 1;
+      db.execSync('PRAGMA user_version = 1');
+    }
+
+    if (version < 2) {
+      db.execSync(SCHEMA_V2_SQL);
+      version = 2;
+      db.execSync('PRAGMA user_version = 2');
+    }
+
+    if (version < 3) {
+      db.execSync(SCHEMA_V3_MEMORY_SQL);
+      try {
+        db.execSync(SCHEMA_V3_FTS_SQL);
+        ftsAvailable = true;
+      } catch {
+        ftsAvailable = false;
+      }
+      version = 3;
+      db.execSync('PRAGMA user_version = 3');
     } else {
-      db.execSync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+      try {
+        db.getFirstSync('SELECT 1 FROM memories_fts LIMIT 1');
+        ftsAvailable = true;
+      } catch {
+        try {
+          db.execSync(SCHEMA_V3_FTS_SQL);
+          ftsAvailable = true;
+        } catch {
+          ftsAvailable = false;
+        }
+      }
     }
 
     return db;
@@ -155,6 +279,11 @@ export function getLocalDb(): SQLiteDatabase | null {
 
 export function isNativeSqliteAvailable(): boolean {
   return getLocalDb() !== null;
+}
+
+export function isFts5Available(): boolean {
+  getLocalDb();
+  return ftsAvailable;
 }
 
 export function getPreferenceSync<T>(prefKey: string): T | null {
@@ -316,7 +445,6 @@ export function markReminderDeliveredSync(
        VALUES (?, ?, ?)`,
       [dedupeKey, deliveredBy, now],
     );
-    // Prune ledger entries older than 7 days
     const cutoff = now - 7 * 24 * 60 * 60 * 1000;
     db.runSync('DELETE FROM local_reminder_ledger WHERE delivered_at < ?', [cutoff]);
   } catch {
@@ -325,38 +453,35 @@ export function markReminderDeliveredSync(
 }
 
 /**
- * Purges all user-scoped records from local SQLite on sign-out or account switch
- * so no prior user's schedules, transcripts, sync cursors, or pending mutations remain.
+ * Permanently wipes all local companion data (conversations, memories, schedules,
+ * provider configs, tool permissions, and caches) and compacts SQLite storage.
  */
-export function purgeUserScopedDataSync(userId?: string): void {
-  for (const key of Array.from(fallbackCache.keys())) {
-    if (key.startsWith('sync_cursor:') || (userId && key.includes(userId))) {
-      fallbackCache.delete(key);
-    }
-  }
-  if (userId) {
-    fallbackPrefs.delete(`fcm_reg:${userId}`);
-  }
+export function wipeAllLocalCompanionDataSync(): void {
+  fallbackPrefs.clear();
+  fallbackCache.clear();
   fallbackReminderLedger.clear();
 
   const db = getLocalDb();
   if (!db) return;
   try {
     db.withTransactionSync(() => {
-      if (userId) {
-        db.runSync('DELETE FROM local_call_schedules WHERE user_id = ?', [userId]);
-        db.runSync('DELETE FROM local_call_sessions WHERE user_id = ?', [userId]);
-        db.runSync('DELETE FROM sync_outbox WHERE user_id = ?', [userId]);
-        db.runSync('DELETE FROM local_preferences WHERE pref_key = ?', [`fcm_reg:${userId}`]);
-        db.runSync('DELETE FROM cache_entries WHERE cache_key LIKE ?', [`sync_cursor:%:${userId}`]);
-      } else {
-        db.runSync('DELETE FROM local_call_schedules');
-        db.runSync('DELETE FROM local_call_sessions');
-        db.runSync('DELETE FROM sync_outbox');
-        db.runSync("DELETE FROM cache_entries WHERE cache_key LIKE 'sync_cursor:%'");
+      db.runSync('DELETE FROM memory_embeddings');
+      db.runSync('DELETE FROM memories');
+      if (ftsAvailable) {
+        db.runSync('DELETE FROM memories_fts');
       }
+      db.runSync('DELETE FROM messages');
+      db.runSync('DELETE FROM conversations');
+      db.runSync('DELETE FROM automation_runs');
+      db.runSync('DELETE FROM tool_permissions');
+      db.runSync('DELETE FROM ai_providers');
+      db.runSync('DELETE FROM app_settings');
+      db.runSync('DELETE FROM local_call_schedules');
+      db.runSync('DELETE FROM local_call_sessions');
       db.runSync('DELETE FROM local_reminder_ledger');
+      db.runSync('DELETE FROM cache_entries');
     });
+    db.execSync('VACUUM');
   } catch {
     // Ignore cleanup errors
   }

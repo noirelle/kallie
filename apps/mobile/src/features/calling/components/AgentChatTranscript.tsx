@@ -1,40 +1,59 @@
 import React, { memo, useCallback, useEffect, useRef } from 'react';
 import { Animated, FlatList, StyleSheet, Text, View } from 'react-native';
-import { AgentVisualizerState, CallChatMessage } from '../hooks/useLiveKitCall';
+import { FONT, MONO } from '../../../theme/monoTheme';
+import { AgentVisualizerState, CallChatMessage } from '../hooks/useDirectVoiceSession';
 
 interface AgentChatTranscriptProps {
   messages: CallChatMessage[];
   agentState: AgentVisualizerState;
 }
 
+/**
+ * Minimalist 3-dot monochrome breathing pulse — zero redundant text.
+ */
 const ThinkingIndicator = memo(function ThinkingIndicator() {
-  const pulse = useRef(new Animated.Value(0.35)).current;
+  const dotA = useRef(new Animated.Value(0.25)).current;
+  const dotB = useRef(new Animated.Value(0.25)).current;
+  const dotC = useRef(new Animated.Value(0.25)).current;
 
   useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 0.9,
-          duration: 720,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 0.3,
-          duration: 720,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [pulse]);
+    const createWave = (val: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(val, {
+            toValue: 0.95,
+            duration: 420,
+            useNativeDriver: true,
+          }),
+          Animated.timing(val, {
+            toValue: 0.22,
+            duration: 420,
+            useNativeDriver: true,
+          }),
+          Animated.delay(Math.max(0, 360 - delay)),
+        ]),
+      );
+
+    const animA = createWave(dotA, 0);
+    const animB = createWave(dotB, 140);
+    const animC = createWave(dotC, 280);
+    animA.start();
+    animB.start();
+    animC.start();
+
+    return () => {
+      animA.stop();
+      animB.stop();
+      animC.stop();
+    };
+  }, [dotA, dotB, dotC]);
 
   return (
-    <View style={styles.thinkingRow}>
-      <Animated.View style={[styles.thinkingDot, { opacity: pulse }]} />
-      <Animated.Text style={[styles.thinkingText, { opacity: pulse }]}>
-        Thinking...
-      </Animated.Text>
+    <View style={styles.thinkingRow} accessibilityLabel="Thinking">
+      <Animated.View style={[styles.thinkingDot, { opacity: dotA }]} />
+      <Animated.View style={[styles.thinkingDot, { opacity: dotB }]} />
+      <Animated.View style={[styles.thinkingDot, { opacity: dotC }]} />
     </View>
   );
 });
@@ -50,9 +69,7 @@ const TranscriptItem = memo(function TranscriptItem({
   if (isUser) {
     return (
       <View style={styles.userRow}>
-        <Text
-          style={[styles.userText, isStreaming && styles.streamingText]}
-        >
+        <Text style={[styles.userText, isStreaming && styles.streamingText]}>
           {item.text}
         </Text>
       </View>
@@ -61,9 +78,7 @@ const TranscriptItem = memo(function TranscriptItem({
 
   return (
     <View style={styles.agentRow}>
-      <Text
-        style={[styles.agentText, isStreaming && styles.streamingAgentText]}
-      >
+      <Text style={[styles.agentText, isStreaming && styles.streamingAgentText]}>
         {item.text}
       </Text>
     </View>
@@ -72,19 +87,32 @@ const TranscriptItem = memo(function TranscriptItem({
 
 /**
  * Clean, borderless real-time Chat Transcript:
- * - Zero message bubbles, zero backgrounds, zero borders
- * - User spoken/typed words appear live on the right in subtle light gray
- * - Kallie's spoken responses stream live on the left in crisp white
- * - Smoothly auto-scrolls as words arrive in real time
+ * - Zero message bubbles, zero instructional placeholder copy
+ * - User spoken/typed words appear on the right in neutral gray
+ * - Kallie's spoken responses stream on the left in crisp white Geist
  */
 export const AgentChatTranscript = memo(function AgentChatTranscript({
   messages,
   agentState,
 }: AgentChatTranscriptProps) {
   const listRef = useRef<FlatList<CallChatMessage>>(null);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollToLatest = useCallback(() => {
-    listRef.current?.scrollToEnd({ animated: true });
+    if (scrollTimerRef.current) return;
+    scrollTimerRef.current = setTimeout(() => {
+      scrollTimerRef.current = null;
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 140);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (scrollTimerRef.current) {
+        clearTimeout(scrollTimerRef.current);
+        scrollTimerRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -112,14 +140,7 @@ export const AgentChatTranscript = memo(function AgentChatTranscript({
       keyboardShouldPersistTaps="handled"
       onContentSizeChange={scrollToLatest}
       removeClippedSubviews={false}
-      ListEmptyComponent={
-        agentState === 'thinking' ? undefined : (
-          <View style={styles.emptyWrap}>
-            <Text style={styles.emptyText}>Speak or type below</Text>
-          </View>
-        )
-      }
-      ListFooterComponent={agentState === 'thinking' ? <ThinkingIndicator /> : undefined}
+      ListFooterComponent={agentState === 'thinking' ? ThinkingIndicator : undefined}
     />
   );
 });
@@ -133,42 +154,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingTop: 8,
     paddingBottom: 24,
-    gap: 22,
+    gap: 20,
     flexGrow: 1,
-  },
-  emptyWrap: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: '#52525B',
-    fontSize: 14,
-    textAlign: 'center',
   },
   agentRow: {
     alignSelf: 'flex-start',
     maxWidth: '90%',
   },
   agentText: {
+    fontFamily: FONT.regular,
     color: '#FAFAFA',
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: '400',
-    letterSpacing: -0.1,
+    fontSize: 15.5,
+    lineHeight: 23,
+    letterSpacing: -0.15,
   },
   streamingAgentText: {
-    color: '#E4E4E7',
+    color: '#D4D4D8',
   },
   userRow: {
     alignSelf: 'flex-end',
     maxWidth: '84%',
   },
   userText: {
-    color: '#A1A1AA',
-    fontSize: 15,
-    lineHeight: 23,
-    fontWeight: '400',
+    fontFamily: FONT.regular,
+    color: MONO.textSecondary,
+    fontSize: 14.5,
+    lineHeight: 22,
     textAlign: 'right',
     letterSpacing: -0.1,
   },
@@ -178,18 +189,13 @@ const styles = StyleSheet.create({
   thinkingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginTop: 2,
+    gap: 6,
+    paddingVertical: 6,
   },
   thinkingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#71717A',
-  },
-  thinkingText: {
-    color: '#71717A',
-    fontSize: 14,
-    fontWeight: '400',
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: MONO.textSecondary,
   },
 });

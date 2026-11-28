@@ -1,9 +1,6 @@
 import { ConfigContext, ExpoConfig } from 'expo/config';
 
-const enableAndroidFcm = process.env.EXPO_ENABLE_ANDROID_FCM === 'true';
-const enableIosVoip = process.env.EXPO_ENABLE_IOS_VOIP === 'true';
-const githubRepo = process.env.EXPO_PUBLIC_GITHUB_REPO || '';
-
+const githubRepo = process.env.EXPO_PUBLIC_GITHUB_REPO || 'noirelle/kallie';
 const EAS_PROJECT_ID = '94c7ad06-4859-418e-a5df-a3b69b3082a8';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
@@ -12,7 +9,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'kallie',
   owner: 'noirelle',
   scheme: 'kallie',
-  version: '0.1.4',
+  version: '0.2.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'dark',
@@ -21,16 +18,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: false,
     bundleIdentifier: 'com.kallie.app',
     infoPlist: {
+      NSCameraUsageDescription:
+        'Kallie uses the camera to scan Desktop Bridge QR codes for instant pairing.',
       NSMicrophoneUsageDescription:
-        'Kallie needs microphone access for real-time AI voice calls.',
-      ...(enableIosVoip
-        ? { UIBackgroundModes: ['audio', 'voip'] }
-        : { UIBackgroundModes: ['audio'] }),
+        'Kallie needs microphone access for real-time AI voice conversations.',
+      UIBackgroundModes: ['audio'],
     },
   },
   android: {
     package: 'com.kallie.app',
     backgroundColor: '#000000',
+    allowBackup: false,
     adaptiveIcon: {
       foregroundImage: './assets/android-icon-foreground.png',
       backgroundImage: './assets/android-icon-background.png',
@@ -38,35 +36,37 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       backgroundColor: '#000000',
     },
     permissions: [
+      'CAMERA',
       'RECORD_AUDIO',
       'MODIFY_AUDIO_SETTINGS',
       'BLUETOOTH_CONNECT',
       'WAKE_LOCK',
       'FOREGROUND_SERVICE',
       'FOREGROUND_SERVICE_MICROPHONE',
-      ...(enableAndroidFcm
-        ? [
-            'USE_FULL_SCREEN_INTENT',
-            'FOREGROUND_SERVICE_PHONE_CALL',
-            'POST_NOTIFICATIONS',
-            'MANAGE_OWN_CALLS',
-          ]
-        : []),
+      'POST_NOTIFICATIONS',
+      'USE_FULL_SCREEN_INTENT',
+      'USE_EXACT_ALARM',
+      'SCHEDULE_EXACT_ALARM',
     ],
-    ...(enableAndroidFcm
-      ? { googleServicesFile: process.env.GOOGLE_SERVICES_JSON || './google-services.json' }
-      : {}),
   },
   plugins: [
     'expo-router',
+    'expo-font',
     'expo-sqlite',
     'expo-secure-store',
-    '@livekit/react-native-expo-plugin',
-    '@config-plugins/react-native-webrtc',
+    [
+      'expo-camera',
+      {
+        cameraPermission:
+          'Kallie uses the camera to scan Desktop Bridge QR codes for instant pairing.',
+        recordAudioAndroid: false,
+      },
+    ],
     './plugins/withAndroidOptimization',
     './plugins/withImmersiveAndroid',
     './plugins/withIncomingCallAndroid',
-    ...(enableAndroidFcm ? ['@react-native-firebase/app'] : []),
+    './plugins/withDirectPcmAudioAndroid',
+    './plugins/withPhoneControlAndroid',
   ],
   updates: {
     enabled: true,
@@ -78,8 +78,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     policy: 'appVersion',
   },
   extra: {
-    enableAndroidFcm,
-    enableIosVoip,
     githubRepo,
     eas: {
       projectId: EAS_PROJECT_ID,

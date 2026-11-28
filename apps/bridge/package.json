@@ -1,0 +1,25 @@
+{
+  "name": "@kallie/bridge",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Kallie Desktop Bridge — T3 Code / Munder Difflin-style local AI CLI wrapper with 1-scan QR pairing for Kallie Mobile",
+  "bin": {
+    "kallie-bridge": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  }
+}

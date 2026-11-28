@@ -1,8 +1,15 @@
 import { Linking, PermissionsAndroid, Platform } from 'react-native';
 import { getPreferenceSync, setPreferenceSync } from '../../../lib/storage/localDb';
 import { nativeIncomingCall } from '../../calling/lib/nativeIncomingCall';
+import { phoneControlBridge } from '../../phoneControl/lib/phoneControlBridge';
 
-export type PermissionId = 'microphone' | 'notifications' | 'fullScreenIntent' | 'camera';
+export type PermissionId =
+  | 'microphone'
+  | 'notifications'
+  | 'fullScreenIntent'
+  | 'camera'
+  | 'accessibility'
+  | 'notificationAccess';
 
 export type PermissionStatus = 'granted' | 'denied' | 'blocked' | 'unavailable';
 
@@ -58,6 +65,22 @@ export const PERMISSION_DESCRIPTORS: readonly PermissionDescriptor[] = [
     required: false,
     supported: SUPPORTS_FULL_SCREEN_INTENT_TOGGLE,
   },
+  {
+    id: 'accessibility',
+    title: 'Phone Control & Notch',
+    description:
+      'Allows Kallie to show the live Dynamic Notch pill and tap/type in apps when you ask.',
+    required: false,
+    supported: IS_ANDROID,
+  },
+  {
+    id: 'notificationAccess',
+    title: 'Quick Reply (Messenger)',
+    description:
+      'Lets Kallie read and reply to incoming chat notifications in one step.',
+    required: false,
+    supported: IS_ANDROID,
+  },
 ] as const;
 
 type PermissionListener = (snapshot: PermissionSnapshot) => void;
@@ -82,6 +105,8 @@ function createInitialMeta(): Record<PermissionId, PermissionMeta> {
     notifications: build('notifications'),
     fullScreenIntent: build('fullScreenIntent'),
     camera: build('camera'),
+    accessibility: build('accessibility'),
+    notificationAccess: build('notificationAccess'),
   };
 }
 
@@ -92,6 +117,8 @@ let state: PermissionSnapshot = {
     notifications: IS_ANDROID && ANDROID_API >= 33 ? 'denied' : 'granted',
     fullScreenIntent: SUPPORTS_FULL_SCREEN_INTENT_TOGGLE ? 'denied' : 'granted',
     camera: IS_ANDROID ? 'denied' : 'granted',
+    accessibility: IS_ANDROID ? 'denied' : 'unavailable',
+    notificationAccess: IS_ANDROID ? 'denied' : 'unavailable',
   },
   meta: createInitialMeta(),
   busyKey: null,
@@ -115,6 +142,8 @@ function emit(): void {
       notifications: { ...state.meta.notifications },
       fullScreenIntent: { ...state.meta.fullScreenIntent },
       camera: { ...state.meta.camera },
+      accessibility: { ...state.meta.accessibility },
+      notificationAccess: { ...state.meta.notificationAccess },
     },
     busyKey: state.busyKey,
   };
@@ -127,7 +156,10 @@ function emit(): void {
   });
 }
 
-function applyCheckedStatus(id: PermissionId, granted: boolean): PermissionStatus {
+function applyCheckedStatus(
+  id: PermissionId,
+  granted: boolean,
+): { status: PermissionStatus; changed: boolean } {
   const prevMeta = state.meta[id];
   const nextStatus: PermissionStatus = granted
     ? 'granted'
@@ -155,7 +187,7 @@ function applyCheckedStatus(id: PermissionId, granted: boolean): PermissionStatu
   if (changed) {
     persistMeta(state.meta);
   }
-  return nextStatus;
+  return { status: nextStatus, changed };
 }
 
 async function checkNativePermissionRaw(id: PermissionId): Promise<boolean> {
@@ -174,6 +206,14 @@ async function checkNativePermissionRaw(id: PermissionId): Promise<boolean> {
         return await nativeIncomingCall.canUseFullScreenIntent();
       case 'camera':
         return await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA);
+      case 'accessibility': {
+        const caps = await phoneControlBridge.getCapabilities();
+        return caps.accessibilityConnected || caps.accessibilityEnabled;
+      }
+      case 'notificationAccess': {
+        const caps = await phoneControlBridge.getCapabilities();
+        return caps.notificationAccessConnected || caps.notificationAccessEnabled;
+      }
     }
   } catch {
     return false;
@@ -195,8 +235,10 @@ async function checkPermission(id: PermissionId): Promise<PermissionStatus> {
 
   const promise = (async () => {
     const granted = await checkNativePermissionRaw(id);
-    const status = applyCheckedStatus(id, granted);
-    emit();
+    const { status, changed } = applyCheckedStatus(id, granted);
+    if (changed) {
+      emit();
+    }
     return status;
   })().finally(() => {
     inFlightChecks.delete(id);
@@ -209,11 +251,14 @@ async function checkPermission(id: PermissionId): Promise<PermissionStatus> {
 /**
  * Silently refreshes all managed permissions in parallel without prompting.
  * Automatically detects permissions granted or revoked in system Settings.
+ * Only notifies subscribers when hydration or permission status actually changes.
  */
 async function refreshAll(): Promise<PermissionSnapshot> {
   if (!IS_ANDROID) {
-    state.hydrated = true;
-    emit();
+    if (!state.hydrated) {
+      state.hydrated = true;
+      emit();
+    }
     return getSnapshot();
   }
   if (inFlightRefreshAll) {
@@ -221,16 +266,24 @@ async function refreshAll(): Promise<PermissionSnapshot> {
   }
 
   inFlightRefreshAll = (async () => {
-    const [mic, notif, fsi] = await Promise.all([
+    const [mic, notif, fsi, caps] = await Promise.all([
       checkNativePermissionRaw('microphone'),
       checkNativePermissionRaw('notifications'),
       checkNativePermissionRaw('fullScreenIntent'),
+      phoneControlBridge.getCapabilities(),
     ]);
-    applyCheckedStatus('microphone', mic);
-    applyCheckedStatus('notifications', notif);
-    applyCheckedStatus('fullScreenIntent', fsi);
+    const a11y = caps.accessibilityConnected || caps.accessibilityEnabled;
+    const notifAccess = caps.notificationAccessConnected || caps.notificationAccessEnabled;
+    const r1 = applyCheckedStatus('microphone', mic);
+    const r2 = applyCheckedStatus('notifications', notif);
+    const r3 = applyCheckedStatus('fullScreenIntent', fsi);
+    const r4 = applyCheckedStatus('accessibility', a11y);
+    const r5 = applyCheckedStatus('notificationAccess', notifAccess);
+    const hydrationChanged = !state.hydrated;
     state.hydrated = true;
-    emit();
+    if (hydrationChanged || r1.changed || r2.changed || r3.changed || r4.changed || r5.changed) {
+      emit();
+    }
     return getSnapshot();
   })().finally(() => {
     inFlightRefreshAll = null;
@@ -247,6 +300,14 @@ async function openSystemSettings(id?: PermissionId): Promise<void> {
     }
     if (IS_ANDROID && id === 'notifications') {
       const opened = await nativeIncomingCall.openNotificationSettings();
+      if (opened) return;
+    }
+    if (IS_ANDROID && id === 'accessibility') {
+      const opened = await phoneControlBridge.openAccessibilitySettings();
+      if (opened) return;
+    }
+    if (IS_ANDROID && id === 'notificationAccess') {
+      const opened = await phoneControlBridge.openNotificationListenerSettings();
       if (opened) return;
     }
     await Linking.openSettings();
@@ -290,24 +351,24 @@ async function requestPermission(
         return 'granted' as PermissionStatus;
       }
 
-      if (id === 'fullScreenIntent') {
+      if (id === 'fullScreenIntent' || id === 'accessibility' || id === 'notificationAccess') {
         state.meta[id] = { ...state.meta[id], asked: true };
         persistMeta(state.meta);
-        await openSystemSettings('fullScreenIntent');
-        const rechecked = await checkNativePermissionRaw('fullScreenIntent');
-        return applyCheckedStatus('fullScreenIntent', rechecked);
+        await openSystemSettings(id);
+        const rechecked = await checkNativePermissionRaw(id);
+        return applyCheckedStatus(id, rechecked).status;
       }
 
       if (id === 'notifications' && ANDROID_API < 33) {
         await openSystemSettings('notifications');
-        return applyCheckedStatus('notifications', true);
+        return applyCheckedStatus('notifications', true).status;
       }
 
       // If OS permanently blocked runtime prompts, go straight to Settings
       if (state.meta[id].blocked) {
         await openSystemSettings(id);
         const rechecked = await checkNativePermissionRaw(id);
-        return applyCheckedStatus(id, rechecked);
+        return applyCheckedStatus(id, rechecked).status;
       }
 
       const androidPerm =
@@ -337,7 +398,7 @@ async function requestPermission(
       return state.statuses[id];
     } catch {
       const rechecked = await checkNativePermissionRaw(id);
-      return applyCheckedStatus(id, rechecked);
+      return applyCheckedStatus(id, rechecked).status;
     } finally {
       state.busyKey = null;
       emit();
@@ -359,6 +420,8 @@ function getSnapshot(): PermissionSnapshot {
       notifications: { ...state.meta.notifications },
       fullScreenIntent: { ...state.meta.fullScreenIntent },
       camera: { ...state.meta.camera },
+      accessibility: { ...state.meta.accessibility },
+      notificationAccess: { ...state.meta.notificationAccess },
     },
     busyKey: state.busyKey,
   };

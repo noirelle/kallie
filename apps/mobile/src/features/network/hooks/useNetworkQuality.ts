@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   networkMonitor,
   NetworkQuality,
@@ -13,7 +13,8 @@ export interface UseNetworkQualityResult extends NetworkQualitySnapshot {
 
 /**
  * Subscribes to the singleton real-time NetworkMonitor so Aura and call controls
- * react immediately to Wi-Fi/data loss (red) and slow/unstable links (yellow).
+ * react immediately to Wi-Fi/data loss (red) and slow/unstable links (yellow),
+ * with memoized snapshots to prevent unnecessary downstream re-renders.
  */
 export function useNetworkQuality(): UseNetworkQualityResult {
   const [snapshot, setSnapshot] = useState<NetworkQualitySnapshot>(() =>
@@ -27,12 +28,15 @@ export function useNetworkQuality(): UseNetworkQualityResult {
 
   const checkNow = useCallback(() => networkMonitor.probeNow(true), []);
 
-  return {
-    ...snapshot,
-    isOffline: snapshot.quality === 'disconnected',
-    isWeak: snapshot.quality === 'weak',
-    checkNow,
-  };
+  return useMemo(
+    () => ({
+      ...snapshot,
+      isOffline: snapshot.quality === 'disconnected',
+      isWeak: snapshot.quality === 'weak',
+      checkNow,
+    }),
+    [checkNow, snapshot],
+  );
 }
 
 export type { NetworkQuality };

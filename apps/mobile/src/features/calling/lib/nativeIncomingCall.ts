@@ -4,12 +4,14 @@ export interface IncomingCallIntentEvent {
   action: 'show' | 'answer' | 'answer_background' | 'decline' | 'hangup' | 'open_active';
   sessionId: string;
   title: string;
+  aiPrompt?: string;
 }
 
 export interface LocalReminderAlarmItem {
   scheduleId: string;
   dedupeKey: string;
   title: string;
+  aiPrompt?: string;
   scheduledAtIso: string;
   timezone: string;
   minutesBefore: number;
@@ -24,12 +26,16 @@ interface NativeKallieIncomingCall {
     declineUrl?: string | null,
     declineToken?: string | null,
   ) => void;
+  scheduleTestCall?: (delaySeconds: number, title: string, aiPrompt?: string | null) => void;
+  moveToBackground?: () => void;
+  setKeepScreenOn?: (enabled: boolean) => void;
   dismissIncomingCall: (sessionId: string) => void;
-  startCallForegroundService: (sessionId: string, title: string) => void;
+  startCallForegroundService: (sessionId: string, title: string) => Promise<boolean>;
   stopCallForegroundService: () => void;
   getActiveCallSessionId: () => Promise<string | null>;
   showReminderNotification: (scheduleId: string, title: string, body: string) => void;
   syncLocalReminderAlarms?: (alarmsJson: string) => void;
+  consumePendingCallIntentSync?: () => IncomingCallIntentEvent | null;
   consumePendingCallIntent: () => Promise<IncomingCallIntentEvent | null>;
   canUseFullScreenIntent: () => Promise<boolean>;
   openFullScreenIntentSettings: () => Promise<boolean>;
@@ -78,11 +84,46 @@ export const nativeIncomingCall = {
     }
   },
 
-  startCallForegroundService(sessionId: string, title: string): void {
+  scheduleTestCall(delaySeconds: number, title: string, aiPrompt?: string | null): void {
     try {
-      nativeMod?.startCallForegroundService(sessionId, title);
+      nativeMod?.scheduleTestCall?.(delaySeconds, title, aiPrompt ?? null);
     } catch {
       // Safe no-op
+    }
+  },
+
+  moveToBackground(): void {
+    try {
+      nativeMod?.moveToBackground?.();
+    } catch {
+      // Safe no-op
+    }
+  },
+
+  setKeepScreenOn(enabled: boolean): void {
+    try {
+      nativeMod?.setKeepScreenOn?.(enabled);
+    } catch {
+      // Safe no-op
+    }
+  },
+
+  consumePendingCallIntentSync(): IncomingCallIntentEvent | null {
+    if (Platform.OS !== 'android' || !nativeMod?.consumePendingCallIntentSync) return null;
+    try {
+      return nativeMod.consumePendingCallIntentSync();
+    } catch {
+      return null;
+    }
+  },
+
+  async startCallForegroundService(sessionId: string, title: string): Promise<boolean> {
+    if (!nativeMod) return true;
+    try {
+      const res = await nativeMod.startCallForegroundService(sessionId, title);
+      return Boolean(res);
+    } catch {
+      return false;
     }
   },
 

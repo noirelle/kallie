@@ -11,9 +11,9 @@ import {
 } from 'motion/react';
 
 const HERO_TAGLINE_WORDS =
-  'AN AI VOICE COMPANION THAT CALLS YOU BACK ON YOUR SCHEDULE.'.split(' ');
+  'A PRIVATE, LOCAL-FIRST AI COMPANION THAT LIVES ON YOUR ANDROID DEVICE.'.split(' ');
 
-const INTERLUDE_WORDS = 'ALWAYS READY. ALWAYS ON TIME.'.split(' ');
+const INTERLUDE_WORDS = 'NO ACCOUNTS. NO CLOUD LOCK-IN. ALL YOURS.'.split(' ');
 
 const VOICE_EXAMPLES = [
   {
@@ -347,23 +347,24 @@ export function ScrollShowcase() {
           <div className="mx-auto grid w-full max-w-5xl grid-cols-1 items-center gap-8 lg:grid-cols-12 lg:gap-12">
             <div className="lg:col-span-5">
               <p className="font-mono text-[10px] tracking-[0.28em] text-zinc-500 uppercase">
-                01 / Dynamic Voice
+                01 / Local-First Voice &amp; Chat
               </p>
               <h2 className="mt-4 text-4xl font-semibold tracking-tight text-white md:text-5xl">
-                Just say when.
+                Open and talk.
               </h2>
               <p className="mt-5 text-sm leading-7 text-zinc-400 md:text-base">
-                No forms. No calendar taps. Tell Kallie when to call you back or what to remind
-                you about—she understands natural speech and schedules it immediately.
+                No sign-up. No subscriptions. No cloud backend. Pair your PC&apos;s Antigravity,
+                Claude Code, Codex, Gemini CLI, or Ollama by scanning a QR code—or connect in one
+                tap via OpenRouter or your own API key.
               </p>
               <div className="mt-8 grid grid-cols-2 gap-4 border-t border-white/10 pt-6 font-mono text-[10px] tracking-[0.18em] text-zinc-400 uppercase">
                 <div>
-                  <span className="block text-white">Sub-Second</span>
-                  Gemini Live Audio
+                  <span className="block text-white">Plug &amp; Play Connect</span>
+                  PC QR Bridge · 1-Tap OpenRouter · BYOK
                 </div>
                 <div>
-                  <span className="block text-white">Hands-Free</span>
-                  Voice Hangup & Cancel
+                  <span className="block text-white">On-Device Memory</span>
+                  SQLite &amp; Hybrid Search
                 </div>
               </div>
             </div>
@@ -389,19 +390,19 @@ export function ScrollShowcase() {
                 02 / Native Android
               </p>
               <h2 className="mt-4 text-4xl font-semibold tracking-tight text-white md:text-5xl">
-                Rings even when locked.
+                Rings even offline.
               </h2>
               <p className="mt-5 text-sm leading-7 text-zinc-400 md:text-base">
-                When your scheduled moment arrives, Kallie wakes your Android device through
-                high-priority push and native call UI. Answer and talk immediately over LiveKit
-                WebRTC.
+                Schedules, reminders, conversations, and long-term memories stay private on your
+                device. Native Android alarms wake your screen right on time and start a direct
+                real-time voice session straight from your phone.
               </p>
-              <div className="mt-8 flex items-center gap-6 border-t border-white/10 pt-6 font-mono text-[10px] tracking-[0.18em] text-zinc-400 uppercase">
-                <span>LiveKit WebRTC</span>
+              <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-white/10 pt-6 font-mono text-[10px] tracking-[0.18em] text-zinc-400 uppercase">
+                <span>Android Keystore</span>
                 <span className="text-zinc-700">/</span>
-                <span>Android FCM</span>
+                <span>PC QR Bridge</span>
                 <span className="text-zinc-700">/</span>
-                <span>OTA Updates</span>
+                <span>Direct Voice</span>
               </div>
             </div>
           </div>

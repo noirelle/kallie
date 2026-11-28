@@ -1,7 +1,7 @@
 import { getLocalDb } from '../../../lib/storage/localDb';
 import { CallSession, TranscriptEntry } from '../../../types/database';
 
-const MAX_RETAINED_SESSIONS = 50;
+const MAX_RETAINED_SESSIONS = 100;
 
 interface LocalSessionRow {
   id: string;
@@ -66,22 +66,19 @@ function rowToCallSession(row: LocalSessionRow): CallSession {
   };
 }
 
-export function getCallHistorySync(userId: string, limit = MAX_RETAINED_SESSIONS): CallSession[] {
-  if (!userId) return [];
+export function getCallHistorySync(limit = MAX_RETAINED_SESSIONS): CallSession[] {
   const db = getLocalDb();
   if (!db) {
     return Array.from(fallbackSessions.values())
-      .filter((s) => s.user_id === userId)
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
       .slice(0, limit);
   }
   try {
     const rows = db.getAllSync<LocalSessionRow>(
       `SELECT * FROM local_call_sessions
-       WHERE user_id = ?
        ORDER BY created_at DESC
        LIMIT ?`,
-      [userId, limit],
+      [limit],
     );
     return rows.map(rowToCallSession);
   } catch {
@@ -89,65 +86,56 @@ export function getCallHistorySync(userId: string, limit = MAX_RETAINED_SESSIONS
   }
 }
 
-export function applyServerSessions(userId: string, sessions: CallSession[]): void {
-  if (!sessions.length) return;
+export function saveLocalCallSession(session: CallSession): void {
   const db = getLocalDb();
   if (!db) {
-    for (const s of sessions) {
-      fallbackSessions.set(s.id, s);
-    }
+    fallbackSessions.set(session.id, session);
     notifySessionListeners();
     return;
   }
 
   try {
     db.withTransactionSync(() => {
-      for (const s of sessions) {
-        db.runSync(
-          `INSERT INTO local_call_sessions (
-             id, schedule_id, user_id, room_name, title, ai_prompt, status,
-             started_at, ended_at, transcript_json, summary, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET
-             status = excluded.status,
-             started_at = excluded.started_at,
-             ended_at = excluded.ended_at,
-             transcript_json = excluded.transcript_json,
-             summary = excluded.summary,
-             updated_at = excluded.updated_at`,
-          [
-            s.id,
-            s.schedule_id ?? null,
-            s.user_id || userId,
-            s.room_name,
-            s.title,
-            s.ai_prompt,
-            s.status,
-            s.started_at ?? null,
-            s.ended_at ?? null,
-            JSON.stringify(Array.isArray(s.transcript) ? s.transcript : []),
-            s.summary ?? null,
-            s.created_at,
-            s.updated_at,
-          ],
-        );
-      }
+      db.runSync(
+        `INSERT INTO local_call_sessions (
+           id, schedule_id, user_id, room_name, title, ai_prompt, status,
+           started_at, ended_at, transcript_json, summary, created_at, updated_at
+         ) VALUES (?, ?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           status = excluded.status,
+           started_at = excluded.started_at,
+           ended_at = excluded.ended_at,
+           transcript_json = excluded.transcript_json,
+           summary = excluded.summary,
+           updated_at = excluded.updated_at`,
+        [
+          session.id,
+          session.schedule_id ?? null,
+          session.room_name,
+          session.title,
+          session.ai_prompt,
+          session.status,
+          session.started_at ?? null,
+          session.ended_at ?? null,
+          JSON.stringify(Array.isArray(session.transcript) ? session.transcript : []),
+          session.summary ?? null,
+          session.created_at,
+          session.updated_at,
+        ],
+      );
 
-      // Auto-prune older sessions beyond bounded retention cap (50 per user)
       db.runSync(
         `DELETE FROM local_call_sessions
-         WHERE user_id = ?
-           AND id NOT IN (
-             SELECT id FROM local_call_sessions
-             WHERE user_id = ?
-             ORDER BY created_at DESC
-             LIMIT ?
-           )`,
-        [userId, userId, MAX_RETAINED_SESSIONS],
+         WHERE id NOT IN (
+           SELECT id FROM local_call_sessions
+           ORDER BY created_at DESC
+           LIMIT ?
+         )`,
+        [MAX_RETAINED_SESSIONS],
       );
     });
   } catch {
-    // Ignore local cache write errors
+    // Ignore local write errors
   }
 
   notifySessionListeners();

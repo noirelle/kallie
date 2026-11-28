@@ -8,6 +8,102 @@ export type CallSessionStatus =
   | 'missed'
   | 'declined';
 
+export type AiProviderType = 'anthropic' | 'openai' | 'gemini' | 'openai_compatible';
+
+export interface AiProviderCapabilities {
+  streaming: boolean;
+  tools: boolean;
+  structuredJson: boolean;
+  vision: boolean;
+  embeddings: boolean;
+  realtimeVoice: boolean;
+}
+
+export interface AiProviderConfig {
+  id: string;
+  providerType: AiProviderType;
+  displayName: string;
+  baseUrl: string | null;
+  defaultModel: string;
+  embeddingModel: string | null;
+  extraHeaders: Record<string, string>;
+  capabilities: AiProviderCapabilities;
+  isActive: boolean;
+  secretKeyRef: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VoiceSettings {
+  liveVoiceEnabled: boolean;
+  voiceName: string;
+  useByokForVoice: boolean;
+  customTokenServerUrl: string | null;
+  preferredAudioOutput: 'speaker' | 'earpiece';
+}
+
+export interface ConversationRecord {
+  id: string;
+  title: string;
+  mode: 'chat' | 'voice' | 'hybrid';
+  providerId: string | null;
+  modelId: string | null;
+  summary: string | null;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+}
+
+export interface ChatMessageRecord {
+  id: string;
+  conversationId: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  toolCallsJson?: string | null;
+  toolCallId?: string | null;
+  tokenUsageJson?: string | null;
+  source: 'text' | 'voice_transcript' | 'automation';
+  createdAt: string;
+}
+
+export type MemoryType = 'preference' | 'fact' | 'episodic' | 'procedural';
+
+export interface MemoryRecord {
+  id: string;
+  memoryType: MemoryType;
+  content: string;
+  normalizedHash: string;
+  entities: string[];
+  sourceConversationId: string | null;
+  confidence: number;
+  importance: number;
+  reinforcementCount: number;
+  lastAccessedAt: string | null;
+  pinned: boolean;
+  status: 'active' | 'superseded' | 'archived';
+  supersededBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ToolPermissionPolicy = 'allow' | 'ask' | 'deny';
+
+export interface ToolPermissionRecord {
+  toolId: string;
+  policy: ToolPermissionPolicy;
+  updatedAt: string;
+}
+
+export interface AutomationRunRecord {
+  id: string;
+  toolId: string;
+  conversationId: string | null;
+  inputJson: string;
+  outputJson: string | null;
+  status: 'pending' | 'approved' | 'executed' | 'denied' | 'failed';
+  createdAt: string;
+}
+
 export interface CallSchedule {
   id: string;
   user_id: string;
@@ -33,7 +129,8 @@ export interface TranscriptEntry {
 export interface CallSession {
   id: string;
   schedule_id: string | null;
-  user_id: string;
+  user_id?: string;
+  device_id?: string;
   room_name: string;
   title: string;
   ai_prompt: string;
@@ -44,11 +141,4 @@ export interface CallSession {
   summary: string | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface JoinCallResponse {
-  session: CallSession;
-  livekitUrl: string;
-  roomName: string;
-  token: string;
 }

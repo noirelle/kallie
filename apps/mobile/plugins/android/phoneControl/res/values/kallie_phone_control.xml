@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="kallie_accessibility_description">Allows Kallie to display the live Dynamic Notch overlay, inspect on-screen elements, and perform taps or typing only when you ask.</string>
+    <string name="kallie_notification_listener_label">Kallie Quick Reply</string>
+</resources>

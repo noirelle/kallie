@@ -52,10 +52,10 @@ export default function RootLayout({ children }: RootLayoutProps) {
       )}
     >
       <head>
-        <title>Kallie — AI Voice Companion for Android</title>
+        <title>Kallie — Local-First AI Companion for Android</title>
         <meta
           name="description"
-          content="Kallie is a minimalist AI voice companion for Android that calls you back on your schedule."
+          content="Kallie is a private, local-first AI companion for Android with PC QR bridge pairing, 1-tap OpenRouter connect, on-device SQLite memory, and serverless direct real-time voice."
         />
       </head>
       <body className="bg-background text-foreground overflow-x-hidden">

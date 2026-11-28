@@ -6,13 +6,21 @@ interface IconProps {
   size?: number;
 }
 
+function scaleStyle(size: number, base = 22) {
+  return size === base ? undefined : { transform: [{ scale: size / base }] };
+}
+
 /**
- * Lightweight pure React Native icons used in ActiveCallView.
+ * Lightweight pure React Native icons used in ActiveCallView & Settings.
  * Replaces @expo/vector-icons to avoid bundling ~3.7 MB of unused icon font families.
  */
-export function MicIcon({ color, muted = false }: IconProps & { muted?: boolean }) {
+export function MicIcon({
+  color,
+  size = 20,
+  muted = false,
+}: IconProps & { muted?: boolean }) {
   return (
-    <View style={styles.box}>
+    <View style={[styles.box, scaleStyle(size)]}>
       <View style={[styles.micCapsule, { borderColor: color, backgroundColor: color }]} />
       <View style={[styles.micCup, { borderColor: color }]} />
       <View style={[styles.micStem, { backgroundColor: color }]} />
@@ -22,9 +30,13 @@ export function MicIcon({ color, muted = false }: IconProps & { muted?: boolean 
   );
 }
 
-export function SpeakerIcon({ color, active = true }: IconProps & { active?: boolean }) {
+export function SpeakerIcon({
+  color,
+  size = 20,
+  active = true,
+}: IconProps & { active?: boolean }) {
   return (
-    <View style={styles.box}>
+    <View style={[styles.box, scaleStyle(size)]}>
       <View style={[styles.speakerBody, { backgroundColor: color }]} />
       <View style={[styles.speakerCone, { borderRightColor: color }]} />
       {active ? (
@@ -33,15 +45,15 @@ export function SpeakerIcon({ color, active = true }: IconProps & { active?: boo
           <View style={[styles.waveOuter, { borderColor: color }]} />
         </>
       ) : (
-        <View style={[styles.waveInner, { borderColor: color, opacity: 0.45 }]} />
+        <View style={[styles.waveInner, { borderColor: color, opacity: 0.4 }]} />
       )}
     </View>
   );
 }
 
-export function HangupIcon({ color }: IconProps) {
+export function HangupIcon({ color, size = 21 }: IconProps) {
   return (
-    <View style={styles.box}>
+    <View style={[styles.box, scaleStyle(size)]}>
       <View style={[styles.phoneArc, { borderColor: color }]} />
       <View style={[styles.phoneEarLeft, { backgroundColor: color }]} />
       <View style={[styles.phoneEarRight, { backgroundColor: color }]} />
@@ -50,29 +62,44 @@ export function HangupIcon({ color }: IconProps) {
   );
 }
 
-export function ChatIcon({ color }: IconProps) {
+/**
+ * Modern Minimalist Message Icon:
+ * Continuous asymmetric-corner squircle contour (no detached triangle seam)
+ * paired with three optically balanced center dots.
+ */
+export function ChatIcon({ color, size = 20 }: IconProps) {
   return (
-    <View style={styles.box}>
-      <View style={[styles.chatBubble, { borderColor: color }]}>
-        <View style={[styles.chatLineLong, { backgroundColor: color }]} />
-        <View style={[styles.chatLineShort, { backgroundColor: color }]} />
+    <View style={[styles.box, scaleStyle(size)]}>
+      <View style={[styles.messageShell, { borderColor: color }]}>
+        <View style={styles.messageDotsRow}>
+          <View style={[styles.messageDot, { backgroundColor: color }]} />
+          <View style={[styles.messageDot, { backgroundColor: color }]} />
+          <View style={[styles.messageDot, { backgroundColor: color }]} />
+        </View>
       </View>
-      <View style={[styles.chatTail, { borderTopColor: color }]} />
     </View>
   );
 }
 
-export function SendIcon({ color }: IconProps) {
+/**
+ * Minimalist Upward Arrow Send Icon (modern AI composer standard).
+ */
+export function SendIcon({ color, size = 20 }: IconProps) {
   return (
-    <View style={styles.box}>
-      <View style={[styles.sendArrow, { borderLeftColor: color }]} />
+    <View style={[styles.box, scaleStyle(size)]}>
+      <View style={[styles.sendHead, { borderColor: color }]} />
+      <View style={[styles.sendShaft, { backgroundColor: color }]} />
     </View>
   );
 }
 
-export function CameraIcon({ color, enabled = false }: IconProps & { enabled?: boolean }) {
+export function CameraIcon({
+  color,
+  size = 20,
+  enabled = false,
+}: IconProps & { enabled?: boolean }) {
   return (
-    <View style={styles.box}>
+    <View style={[styles.box, scaleStyle(size)]}>
       <View style={[styles.camBody, { borderColor: color }]} />
       <View style={[styles.camLens, { borderRightColor: color }]} />
       {!enabled ? <View style={[styles.slash, { backgroundColor: color }]} /> : null}
@@ -80,9 +107,9 @@ export function CameraIcon({ color, enabled = false }: IconProps & { enabled?: b
   );
 }
 
-export function ScreenShareIcon({ color }: IconProps) {
+export function ScreenShareIcon({ color, size = 20 }: IconProps) {
   return (
-    <View style={styles.box}>
+    <View style={[styles.box, scaleStyle(size)]}>
       <View style={[styles.screenFrame, { borderColor: color }]}>
         <View style={[styles.screenArrowHead, { borderColor: color }]} />
         <View style={[styles.screenArrowStem, { backgroundColor: color }]} />
@@ -100,184 +127,185 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   micCapsule: {
-    width: 7,
-    height: 11,
-    borderRadius: 4,
+    width: 6.5,
+    height: 10.5,
+    borderRadius: 3.5,
     borderWidth: 1.5,
     position: 'absolute',
-    top: 2,
+    top: 2.5,
   },
   micCup: {
-    width: 13,
-    height: 8,
-    borderBottomLeftRadius: 7,
-    borderBottomRightRadius: 7,
-    borderLeftWidth: 1.8,
-    borderRightWidth: 1.8,
-    borderBottomWidth: 1.8,
+    width: 12.5,
+    height: 7.5,
+    borderBottomLeftRadius: 6.5,
+    borderBottomRightRadius: 6.5,
+    borderLeftWidth: 1.65,
+    borderRightWidth: 1.65,
+    borderBottomWidth: 1.65,
     position: 'absolute',
-    top: 8,
+    top: 8.5,
   },
   micStem: {
-    width: 1.8,
-    height: 3.5,
+    width: 1.65,
+    height: 3.2,
     position: 'absolute',
-    top: 15.5,
+    top: 15.8,
   },
   micBase: {
-    width: 8,
-    height: 1.8,
+    width: 7.5,
+    height: 1.65,
     borderRadius: 1,
     position: 'absolute',
-    top: 18.5,
+    top: 18.6,
   },
   slash: {
-    width: 20,
-    height: 2,
+    width: 19,
+    height: 1.75,
     borderRadius: 1,
     position: 'absolute',
     transform: [{ rotate: '-45deg' }],
   },
   speakerBody: {
-    width: 5,
-    height: 7,
-    borderRadius: 1,
+    width: 4.5,
+    height: 6.5,
+    borderRadius: 1.2,
     position: 'absolute',
-    left: 2,
+    left: 2.5,
   },
   speakerCone: {
     width: 0,
     height: 0,
-    borderTopWidth: 6.5,
-    borderBottomWidth: 6.5,
-    borderRightWidth: 7,
+    borderTopWidth: 6,
+    borderBottomWidth: 6,
+    borderRightWidth: 6.5,
     borderTopColor: 'transparent',
     borderBottomColor: 'transparent',
     position: 'absolute',
-    left: 5,
+    left: 5.2,
   },
   waveInner: {
-    width: 6,
-    height: 9,
-    borderTopRightRadius: 6,
-    borderBottomRightRadius: 6,
+    width: 5.5,
+    height: 8.5,
+    borderTopRightRadius: 5.5,
+    borderBottomRightRadius: 5.5,
     borderTopWidth: 1.6,
     borderRightWidth: 1.6,
     borderBottomWidth: 1.6,
     position: 'absolute',
-    right: 4,
+    right: 4.2,
   },
   waveOuter: {
-    width: 8,
-    height: 14,
-    borderTopRightRadius: 9,
-    borderBottomRightRadius: 9,
+    width: 7.5,
+    height: 13.5,
+    borderTopRightRadius: 8.5,
+    borderBottomRightRadius: 8.5,
     borderTopWidth: 1.6,
     borderRightWidth: 1.6,
     borderBottomWidth: 1.6,
     position: 'absolute',
-    right: 1,
+    right: 1.2,
   },
   phoneArc: {
-    width: 17,
-    height: 10,
-    borderTopLeftRadius: 9,
-    borderTopRightRadius: 9,
-    borderTopWidth: 2,
-    borderLeftWidth: 2,
-    borderRightWidth: 2,
+    width: 16.5,
+    height: 9.5,
+    borderTopLeftRadius: 8.5,
+    borderTopRightRadius: 8.5,
+    borderTopWidth: 1.9,
+    borderLeftWidth: 1.9,
+    borderRightWidth: 1.9,
     position: 'absolute',
-    top: 7,
+    top: 7.2,
   },
   phoneEarLeft: {
-    width: 4.5,
-    height: 4.5,
+    width: 4.2,
+    height: 4.2,
     borderRadius: 1.5,
     position: 'absolute',
-    left: 1.5,
-    top: 12.5,
+    left: 1.8,
+    top: 12.6,
   },
   phoneEarRight: {
-    width: 4.5,
-    height: 4.5,
+    width: 4.2,
+    height: 4.2,
     borderRadius: 1.5,
     position: 'absolute',
-    right: 1.5,
-    top: 12.5,
+    right: 1.8,
+    top: 12.6,
   },
   phoneSlash: {
-    width: 21,
-    height: 1.8,
+    width: 20,
+    height: 1.75,
     borderRadius: 1,
     position: 'absolute',
     transform: [{ rotate: '-45deg' }],
   },
-  chatBubble: {
-    width: 17,
-    height: 13,
-    borderWidth: 1.7,
-    borderRadius: 2,
-    paddingHorizontal: 3,
+  messageShell: {
+    width: 17.5,
+    height: 15.5,
+    borderWidth: 1.65,
+    borderTopLeftRadius: 6.5,
+    borderTopRightRadius: 6.5,
+    borderBottomRightRadius: 6.5,
+    borderBottomLeftRadius: 2,
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: 2.5,
-    marginBottom: 2,
   },
-  chatLineLong: {
-    width: 9,
-    height: 1.5,
+  messageDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2.4,
   },
-  chatLineShort: {
-    width: 6,
-    height: 1.5,
+  messageDot: {
+    width: 2,
+    height: 2,
+    borderRadius: 1,
   },
-  chatTail: {
-    width: 0,
-    height: 0,
-    borderTopWidth: 4,
-    borderRightWidth: 4,
-    borderRightColor: 'transparent',
+  sendHead: {
+    width: 7.5,
+    height: 7.5,
+    borderTopWidth: 1.85,
+    borderLeftWidth: 1.85,
+    borderTopLeftRadius: 1,
+    transform: [{ rotate: '45deg' }],
     position: 'absolute',
-    bottom: 1,
-    left: 4,
+    top: 5.5,
   },
-  sendArrow: {
-    width: 0,
-    height: 0,
-    borderTopWidth: 6,
-    borderBottomWidth: 6,
-    borderLeftWidth: 10,
-    borderTopColor: 'transparent',
-    borderBottomColor: 'transparent',
-    marginLeft: 2,
+  sendShaft: {
+    width: 1.85,
+    height: 11.5,
+    borderRadius: 1,
+    position: 'absolute',
+    top: 5.5,
   },
   camBody: {
     width: 13,
-    height: 11,
-    borderWidth: 1.7,
-    borderRadius: 2.5,
+    height: 10.5,
+    borderWidth: 1.65,
+    borderRadius: 3,
     position: 'absolute',
     left: 2,
   },
   camLens: {
     width: 0,
     height: 0,
-    borderTopWidth: 4.5,
-    borderBottomWidth: 4.5,
-    borderRightWidth: 5.5,
+    borderTopWidth: 4.2,
+    borderBottomWidth: 4.2,
+    borderRightWidth: 5.2,
     borderTopColor: 'transparent',
     borderBottomColor: 'transparent',
     position: 'absolute',
     right: 2,
   },
   screenFrame: {
-    width: 18,
-    height: 13,
-    borderWidth: 1.7,
-    borderRadius: 2.5,
+    width: 17.5,
+    height: 12.5,
+    borderWidth: 1.65,
+    borderRadius: 3,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'absolute',
-    top: 3,
+    top: 3.2,
   },
   screenArrowHead: {
     width: 5,
@@ -294,7 +322,7 @@ const styles = StyleSheet.create({
   },
   screenStand: {
     width: 8,
-    height: 1.8,
+    height: 1.65,
     borderRadius: 1,
     position: 'absolute',
     bottom: 2.5,

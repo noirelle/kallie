@@ -4,21 +4,20 @@ import { StyleSheet, View } from 'react-native';
 import { useActiveCallActions } from '../../src/features/calling/context/ActiveCallContext';
 
 /**
- * Deep-link / legacy call route passthrough.
- * Immediately hands off to the singleton ActiveCallContext and replaces to '/'
- * so all voice calls share one unified full-screen Aura canvas with zero duplicate rooms.
+ * Deep-link passthrough that launches a local voice session on the unified Home Aura canvas.
  */
 export default function ActiveCallScreen() {
-  const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
+  const { title } = useLocalSearchParams<{ sessionId?: string; title?: string }>();
   const router = useRouter();
-  const { joinSessionById } = useActiveCallActions();
+  const { startImmediateCall } = useActiveCallActions();
 
   useEffect(() => {
-    if (sessionId) {
-      void joinSessionById(sessionId);
-    }
+    void startImmediateCall({
+      title: typeof title === 'string' ? title : 'Kallie Reminder',
+      isScheduledCallback: true,
+    });
     router.replace('/');
-  }, [joinSessionById, router, sessionId]);
+  }, [router, startImmediateCall, title]);
 
   return <View style={styles.blank} />;
 }

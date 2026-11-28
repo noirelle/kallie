@@ -1,37 +1,47 @@
-import { useRouter } from 'expo-router';
-import React, { useCallback } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useAuth } from '../src/features/auth/hooks/useAuth';
 import { ActiveCallView } from '../src/features/calling/components/ActiveCallView';
 import { useActiveCall } from '../src/features/calling/context/ActiveCallContext';
-import { usePermissions } from '../src/features/permissions/hooks/usePermissions';
+import { SetupGateView } from '../src/features/readiness/components/SetupGateView';
+import { useAppReadiness } from '../src/features/readiness/hooks/useAppReadiness';
+import { MONO } from '../src/theme/monoTheme';
 
 /**
- * Unified pure-black (#000000) Aura canvas backed by the singleton ActiveCallContext.
- * Whether a call starts from tapping Aura, normal notification Answer, or returning
- * to Kallie during an ongoing background call, this view restores the exact active
- * LiveKit session with zero reconnection and zero duplicate connections.
+ * Conditional Aura Home Canvas:
+ * - Waits silently on pure black until provider + permission readiness hydrates (zero flicker).
+ * - Displays minimal monochrome SetupGateView until both AI provider and Microphone are ready.
+ * - Re-validates automatically on focus/return from Settings and smoothly transitions into Aura.
+ * - Hold Aura (460ms) to open Settings; Tap Aura to talk.
  */
+const HOME_CONTROLS = {
+  leave: true,
+  microphone: true,
+  chat: true,
+} as const;
+
 export default function HomeScreen() {
   const router = useRouter();
-  const { user, loading } = useAuth();
-  const {
-    hydrated: permissionsHydrated,
-    allRequiredGranted,
-    missingRequired,
-    meta: permissionMeta,
-  } = usePermissions();
+  const readiness = useAppReadiness();
+  const [screenFocused, setScreenFocused] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+      return () => {
+        setScreenFocused(false);
+      };
+    }, []),
+  );
+
   const {
     sessionActive,
     status,
     agentState,
     agentReady,
     connectionStatus,
-    audioLevel,
-    elapsedSeconds,
     isMuted,
     error,
-    messages,
     startImmediateCall,
     prewarmCallIntent,
     sendMessage,
@@ -39,20 +49,43 @@ export default function HomeScreen() {
     endActiveCall,
   } = useActiveCall();
 
-  // Only show the permission indicator when a REQUIRED permission is missing,
-  // denied, or revoked; optional permissions never clutter the Home screen.
-  const hasMissingRequiredPermission = permissionsHydrated && !allRequiredGranted;
-  const hasRevokedRequiredPermission = missingRequired.some(
-    (descriptor) => permissionMeta[descriptor.id].revoked,
-  );
+  const handleOpenSettings = useCallback(() => {
+    router.push('/settings');
+  }, [router]);
+
+  const handleScanPcQr = useCallback(() => {
+    router.push('/pair');
+  }, [router]);
 
   const handleOpenPermissions = useCallback(() => {
-    const reason = hasRevokedRequiredPermission ? 'revoked' : 'call_microphone';
-    router.push({ pathname: '/permissions', params: { reason } });
-  }, [hasRevokedRequiredPermission, router]);
+    router.push({ pathname: '/permissions', params: { reason: 'call_microphone' } });
+  }, [router]);
 
-  if (loading || !user) {
-    return <View style={styles.blank} />;
+  const handleStartCall = useCallback(() => {
+    void startImmediateCall();
+  }, [startImmediateCall]);
+
+  const handleEndCall = useCallback(() => {
+    endActiveCall();
+  }, [endActiveCall]);
+
+  // Prevent flicker while initial readiness snapshot hydrates
+  if (!readiness.hydrated && !sessionActive) {
+    return <View style={styles.bootBlank} />;
+  }
+
+  // Conditional Aura visibility: hold back normal Aura until required config & mic are ready
+  if (!readiness.isReady && !sessionActive) {
+    return (
+      <SetupGateView
+        providerConfigured={readiness.providerConfigured}
+        microphoneGranted={readiness.microphoneGranted}
+        onConfigureAi={handleOpenSettings}
+        onScanPcQr={handleScanPcQr}
+        onOpenPermissions={handleOpenPermissions}
+        onOpenSettings={handleOpenSettings}
+      />
+    );
   }
 
   return (
@@ -62,33 +95,23 @@ export default function HomeScreen() {
       status={status}
       agentState={agentState}
       connectionStatus={connectionStatus}
-      audioLevel={audioLevel}
-      elapsedSeconds={elapsedSeconds}
       isMuted={isMuted}
       error={error}
-      messages={messages}
-      controls={{
-        leave: true,
-        microphone: true,
-        screenShare: false,
-        camera: false,
-        chat: true,
-      }}
-      showPermissionIndicator={hasMissingRequiredPermission}
-      microphoneMissing={hasMissingRequiredPermission}
-      onOpenPermissions={handleOpenPermissions}
-      onStartCall={startImmediateCall}
+      screenFocused={screenFocused}
+      controls={HOME_CONTROLS}
+      onOpenSettings={handleOpenSettings}
+      onStartCall={handleStartCall}
       onStartCallPressIn={prewarmCallIntent}
       onSendMessage={sendMessage}
       onToggleMute={toggleMute}
-      onEndCall={() => endActiveCall()}
+      onEndCall={handleEndCall}
     />
   );
 }
 
 const styles = StyleSheet.create({
-  blank: {
+  bootBlank: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: MONO.bg,
   },
 });

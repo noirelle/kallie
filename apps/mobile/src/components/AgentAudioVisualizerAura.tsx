@@ -1,13 +1,36 @@
-import React, { memo, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, View, ViewStyle } from 'react-native';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AURA_DEMO_SEQUENCE,
-  AURA_STATUS_PALETTES,
+  Animated,
+  Easing,
+  Platform,
+  requireNativeComponent,
+  StyleSheet,
+  UIManager,
+  View,
+  ViewStyle,
+} from 'react-native';
+import {
   AuraAgentState,
   AuraColorPalette,
   AuraConnectionStatus,
   resolveAuraPalette,
 } from './auraTheme';
+import { useAudioLevel } from '../features/calling/lib/audioLevelStore';
+
+interface NativeSolarAuraProps {
+  state: string;
+  connectionStatus: string;
+  audioLevel: number;
+  style?: ViewStyle;
+}
+
+const HAS_NATIVE_SOLAR_AURA =
+  Platform.OS === 'android' &&
+  Boolean(UIManager.getViewManagerConfig?.('KallieSolarAuraView'));
+
+const NativeSolarAuraView = HAS_NATIVE_SOLAR_AURA
+  ? requireNativeComponent<NativeSolarAuraProps>('KallieSolarAuraView')
+  : null;
 
 export type AuraSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 
@@ -18,8 +41,7 @@ export interface AgentAudioVisualizerAuraProps {
   state?: AuraAgentState;
   connectionStatus?: AuraConnectionStatus;
   audioLevel?: number;
-  themeMode?: 'dark' | 'light';
-  cycleDemoColors?: boolean;
+  liveAudio?: boolean;
   style?: ViewStyle;
 }
 
@@ -32,68 +54,88 @@ const RING_DIAMETERS: Record<AuraSize, number> = {
 };
 
 /**
- * LiveKit Agents UI-compatible `AgentAudioVisualizerAura` adapted for React Native.
- * - Zero-flicker color transitions: smoothly interpolates RGB border/glow colors
- *   directly on a single persistent set of rings (no layer mount/unmount or alpha dips).
- * - Continuous unbroken 60fps native GPU transforms (rotation + breathing) isolated
- *   on parent Animated.Views so color transitions never interrupt or stutter motion.
- * - Uniform 360° borderWidth inside an unclipped canvas for seamless glow in all directions.
+ * Lightweight Android wrapper that renders the native Kotlin KallieSolarAuraView directly
+ * with zero JS Animated.loop or unnecessary useAudioLevel subscriptions.
  */
-export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
+const NativeSolarAuraWrapper = memo(function NativeSolarAuraWrapper({
   size = 'xl',
-  color = '#1FD5F9',
+  state = 'listening',
+  connectionStatus = 'idle',
+  audioLevel: explicitAudioLevel,
+  liveAudio = false,
+  style,
+}: AgentAudioVisualizerAuraProps) {
+  const subscribedLevel = useAudioLevel(liveAudio);
+  const audioLevel = liveAudio ? subscribedLevel : (explicitAudioLevel ?? 0.16);
+  const ringSize = RING_DIAMETERS[size];
+  const canvasSize = Math.round(ringSize * 1.24) + 32;
+
+  if (!NativeSolarAuraView) return null;
+
+  return (
+    <View
+      style={[styles.root, { width: canvasSize, height: canvasSize }, style]}
+      pointerEvents="none"
+    >
+      <NativeSolarAuraView
+        state={state}
+        connectionStatus={connectionStatus}
+        audioLevel={audioLevel}
+        style={{ width: canvasSize, height: canvasSize }}
+      />
+    </View>
+  );
+});
+
+const FallbackSculptedAura = memo(function FallbackSculptedAura({
+  size = 'xl',
+  color = '#FFFFFF',
   colorShift = 0.3,
   state = 'listening',
   connectionStatus,
-  audioLevel = 0.16,
-  cycleDemoColors = false,
+  audioLevel: explicitAudioLevel,
+  liveAudio = false,
   style,
 }: AgentAudioVisualizerAuraProps) {
-  const [demoIndex, setDemoIndex] = useState(0);
+  const subscribedLevel = useAudioLevel(liveAudio);
+  const audioLevel = liveAudio ? subscribedLevel : (explicitAudioLevel ?? 0.16);
 
-  useEffect(() => {
-    if (!cycleDemoColors) return;
-    const timer = setInterval(() => {
-      setDemoIndex((prev) => (prev + 1) % AURA_DEMO_SEQUENCE.length);
-    }, 2400);
-    return () => clearInterval(timer);
-  }, [cycleDemoColors]);
+  const targetPalette: AuraColorPalette = resolveAuraPalette(connectionStatus, color);
 
-  const targetPalette: AuraColorPalette = cycleDemoColors
-    ? AURA_STATUS_PALETTES[AURA_DEMO_SEQUENCE[demoIndex]]
-    : resolveAuraPalette(connectionStatus, color);
-
-  // Pure-GPU (useNativeDriver: true) palette cross-fade so status color shifts
-  // never block the JS thread during Aura tap or WebRTC signaling.
   const [activePalette, setActivePalette] = useState<AuraColorPalette>(targetPalette);
   const [exitingPalette, setExitingPalette] = useState<AuraColorPalette | null>(null);
   const fadeProgress = useRef(new Animated.Value(1)).current;
-  const activePrimaryRef = useRef<string>(targetPalette.primary);
+  const activePaletteRef = useRef<AuraColorPalette>(targetPalette);
 
   useEffect(() => {
-    if (targetPalette.primary === activePrimaryRef.current) {
+    if (targetPalette.primary === activePaletteRef.current.primary) {
       return;
     }
-    const prevPalette = activePalette;
-    activePrimaryRef.current = targetPalette.primary;
+    const prevPalette = activePaletteRef.current;
+    activePaletteRef.current = targetPalette;
     setExitingPalette(prevPalette);
     setActivePalette(targetPalette);
     fadeProgress.stopAnimation();
     fadeProgress.setValue(0);
 
-    Animated.timing(fadeProgress, {
+    let cancelled = false;
+    const anim = Animated.timing(fadeProgress, {
       toValue: 1,
       duration: 280,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) {
+    });
+    anim.start(({ finished }) => {
+      if (finished && !cancelled) {
         setExitingPalette(null);
       }
     });
-  }, [activePalette, fadeProgress, targetPalette]);
+    return () => {
+      cancelled = true;
+      anim.stop();
+    };
+  }, [fadeProgress, targetPalette]);
 
-  // Continuous unbroken native GPU rotation loops
   const rotA = useRef(new Animated.Value(0)).current;
   const rotB = useRef(new Animated.Value(0)).current;
   const rotC = useRef(new Animated.Value(0)).current;
@@ -170,27 +212,27 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
     return () => breatheLoop.stop();
   }, [breathe, state]);
 
-  useEffect(() => {
-    const targetEnergy =
-      state === 'speaking'
-        ? Math.max(0.55, Math.min(1, audioLevel || 0.78))
-        : state === 'thinking'
-          ? 0.5
-          : state === 'connecting'
-            ? 0.42
-            : state === 'listening'
-              ? 0.24
-              : 0.1;
-
-    const targetAlpha =
-      state === 'speaking'
-        ? 1
-        : state === 'connecting' || state === 'thinking'
-          ? 0.94
+  const targetEnergy =
+    state === 'speaking'
+      ? Math.max(0.55, Math.min(1, audioLevel || 0.78))
+      : state === 'thinking'
+        ? 0.5
+        : state === 'connecting'
+          ? 0.42
           : state === 'listening'
-            ? 0.88
-            : 0.78;
+            ? 0.24
+            : 0.1;
 
+  const targetAlpha =
+    state === 'speaking'
+      ? 1
+      : state === 'connecting' || state === 'thinking'
+        ? 0.94
+        : state === 'listening'
+          ? 0.88
+          : 0.78;
+
+  useEffect(() => {
     Animated.parallel([
       Animated.timing(energy, {
         toValue: targetEnergy,
@@ -205,70 +247,90 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
         useNativeDriver: true,
       }),
     ]).start();
-  }, [audioLevel, energy, masterOpacity, state]);
+  }, [energy, masterOpacity, state, targetAlpha, targetEnergy]);
 
-  const spinCW = rotA.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-  const spinCCW = rotB.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['360deg', '0deg'],
-  });
-  const spinFastCW = rotC.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['60deg', '420deg'],
-  });
-
-  const haloScale = Animated.add(
-    breathe.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.95, 1.06],
-    }),
-    energy.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, 0.12],
-    }),
-  );
-
-  const ribbonScale = Animated.add(
-    breathe.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.975, 1.035],
-    }),
-    energy.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, 0.09],
-    }),
-  );
-
-  const haloOpacity = energy.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.32, 0.85],
-  });
-
-  // Pure-GPU opacity cross-fade channels (zero JS-thread frames)
-  const exitingOpacity = fadeProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0],
-  });
+  const {
+    spinCW,
+    spinCCW,
+    spinFastCW,
+    haloScale,
+    sphereScale,
+    corePulseScale,
+    corePulseOpacity,
+    haloOpacity,
+    exitingOpacity,
+  } = useMemo(() => {
+    return {
+      spinCW: rotA.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg'],
+      }),
+      spinCCW: rotB.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['360deg', '0deg'],
+      }),
+      spinFastCW: rotC.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['60deg', '420deg'],
+      }),
+      haloScale: Animated.add(
+        breathe.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.96, 1.05],
+        }),
+        energy.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, 0.14],
+        }),
+      ),
+      sphereScale: Animated.add(
+        breathe.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.985, 1.022],
+        }),
+        energy.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, 0.065],
+        }),
+      ),
+      corePulseScale: Animated.add(
+        breathe.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.9, 1.04],
+        }),
+        energy.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, 0.22],
+        }),
+      ),
+      corePulseOpacity: energy.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.28, 0.78],
+      }),
+      haloOpacity: energy.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.34, 0.88],
+      }),
+      exitingOpacity: fadeProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0],
+      }),
+    };
+  }, [breathe, energy, fadeProgress, rotA, rotB, rotC]);
 
   const ringSize = RING_DIAMETERS[size];
-  const outerRing = Math.round(ringSize * 0.99);
-  const midRing = Math.round(ringSize * 0.95);
-  const innerRing = Math.round(ringSize * 0.91);
-  const haloOuter = Math.round(ringSize * 1.14);
-  const haloMid = Math.round(ringSize * 1.06);
-
-  const stroke =
-    size === 'xs' ? 1.5 : size === 'sm' ? 2.4 : size === 'md' ? 3.4 : 4.4;
+  const sphereSize = Math.round(ringSize * 0.92);
+  const outerHaloWide = Math.round(ringSize * 1.24);
+  const outerHaloMid = Math.round(ringSize * 1.11);
+  const outerHaloNear = Math.round(ringSize * 1.02);
+  const orbitalOuter = Math.round(ringSize * 0.99);
+  const orbitalInner = Math.round(ringSize * 0.95);
+  const stroke = size === 'xs' ? 1.1 : size === 'sm' ? 1.5 : size === 'md' ? 2.0 : 2.4;
   const shiftIntensity = Math.max(0.1, Math.min(0.6, colorShift));
-  // Generous unclipped margin on every side so glow never hits a container edge
-  const canvasSize = haloOuter + 36;
+  const canvasSize = outerHaloWide + 32;
 
-  const renderPaletteRings = (palette: AuraColorPalette) => (
+  const renderSculptedAura = (palette: AuraColorPalette) => (
     <>
-      {/* Layered soft 360° ambient glow rings */}
       <Animated.View
         style={[
           styles.motionLayer,
@@ -279,12 +341,11 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
           style={[
             styles.circle,
             {
-              width: haloOuter,
-              height: haloOuter,
-              borderRadius: haloOuter / 2,
-              borderWidth: Math.max(4, stroke * 3.2),
-              borderColor: palette.glowRgba,
-              opacity: 0.14,
+              width: outerHaloWide,
+              height: outerHaloWide,
+              borderRadius: outerHaloWide / 2,
+              backgroundColor: palette.coreGlow,
+              opacity: 0.055,
             },
           ]}
         />
@@ -292,28 +353,175 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
           style={[
             styles.circle,
             {
-              width: haloMid,
-              height: haloMid,
-              borderRadius: haloMid / 2,
-              borderWidth: Math.max(3, stroke * 2.0),
-              borderColor: palette.glowRgba,
-              opacity: 0.28,
+              width: outerHaloMid,
+              height: outerHaloMid,
+              borderRadius: outerHaloMid / 2,
+              backgroundColor: palette.coreGlow,
+              opacity: 0.1,
+            },
+          ]}
+        />
+        <View
+          style={[
+            styles.circle,
+            {
+              width: outerHaloNear,
+              height: outerHaloNear,
+              borderRadius: outerHaloNear / 2,
+              backgroundColor: palette.primary,
+              opacity: 0.14,
             },
           ]}
         />
       </Animated.View>
 
-      {/* Secondary shifted organic elliptical ring */}
+      <Animated.View
+        style={[
+          styles.sphereShell,
+          {
+            width: sphereSize,
+            height: sphereSize,
+            borderRadius: sphereSize / 2,
+            backgroundColor: palette.coreBase,
+            borderWidth: Math.max(1, stroke * 0.65),
+            borderColor: palette.rimRgba,
+            transform: [{ scale: sphereScale }],
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.circle,
+            {
+              width: sphereSize * 0.94,
+              height: sphereSize * 0.94,
+              borderRadius: (sphereSize * 0.94) / 2,
+              backgroundColor: palette.coreMid,
+              opacity: 0.34,
+              transform: [
+                { translateX: -sphereSize * 0.06 },
+                { translateY: -sphereSize * 0.07 },
+              ],
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.motionLayer,
+            {
+              opacity: 0.38 + shiftIntensity * 0.35,
+              transform: [{ rotate: spinCCW }],
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.circle,
+              {
+                width: sphereSize * 0.84,
+                height: sphereSize * 0.68,
+                borderRadius: sphereSize * 0.42,
+                backgroundColor: palette.secondary,
+                transform: [
+                  { translateX: sphereSize * 0.12 },
+                  { translateY: sphereSize * 0.12 },
+                ],
+              },
+            ]}
+          />
+        </Animated.View>
+        <Animated.View
+          style={[
+            styles.motionLayer,
+            { opacity: 0.56, transform: [{ rotate: spinCW }] },
+          ]}
+        >
+          <View
+            style={[
+              styles.circle,
+              {
+                width: sphereSize * 0.82,
+                height: sphereSize * 0.66,
+                borderRadius: sphereSize * 0.41,
+                backgroundColor: palette.primary,
+                transform: [
+                  { translateX: -sphereSize * 0.12 },
+                  { translateY: -sphereSize * 0.13 },
+                ],
+              },
+            ]}
+          />
+        </Animated.View>
+        <Animated.View
+          style={[
+            styles.motionLayer,
+            {
+              opacity: corePulseOpacity,
+              transform: [{ rotate: spinFastCW }, { scale: corePulseScale }],
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.circle,
+              {
+                width: sphereSize * 0.64,
+                height: sphereSize * 0.5,
+                borderRadius: sphereSize * 0.32,
+                backgroundColor: palette.highlight,
+                opacity: 0.54,
+                transform: [
+                  { translateX: -sphereSize * 0.08 },
+                  { translateY: -sphereSize * 0.09 },
+                ],
+              },
+            ]}
+          />
+        </Animated.View>
+        <Animated.View
+          style={[
+            styles.motionLayer,
+            { opacity: corePulseOpacity, transform: [{ scale: corePulseScale }] },
+          ]}
+        >
+          <View
+            style={[
+              styles.circle,
+              {
+                width: sphereSize * 0.56,
+                height: sphereSize * 0.56,
+                borderRadius: (sphereSize * 0.56) / 2,
+                backgroundColor: palette.highlight,
+                opacity: 0.48,
+              },
+            ]}
+          />
+        </Animated.View>
+        <View
+          style={[
+            styles.circle,
+            {
+              width: sphereSize - Math.max(4, stroke * 2),
+              height: sphereSize - Math.max(4, stroke * 2),
+              borderRadius: (sphereSize - Math.max(4, stroke * 2)) / 2,
+              borderWidth: Math.max(1, stroke * 0.5),
+              borderColor: palette.rimRgba,
+              opacity: 0.55,
+            },
+          ]}
+        />
+      </Animated.View>
+
       <Animated.View
         style={[
           styles.motionLayer,
           {
-            opacity: 0.48 + shiftIntensity * 0.65,
+            opacity: 0.42 + shiftIntensity * 0.4,
             transform: [
               { rotate: spinCCW },
-              { scaleX: 1.045 },
-              { scaleY: 0.955 },
-              { scale: ribbonScale },
+              { scaleX: 1.032 },
+              { scaleY: 0.968 },
+              { scale: sphereScale },
             ],
           },
         ]}
@@ -322,27 +530,26 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
           style={[
             styles.circle,
             {
-              width: outerRing,
-              height: outerRing,
-              borderRadius: outerRing / 2,
-              borderWidth: stroke * 1.15,
+              width: orbitalOuter,
+              height: orbitalOuter,
+              borderRadius: orbitalOuter / 2,
+              borderWidth: Math.max(1, stroke * 0.75),
               borderColor: palette.secondary,
             },
           ]}
         />
       </Animated.View>
 
-      {/* Primary luminous undulating energy ring */}
       <Animated.View
         style={[
           styles.motionLayer,
           {
-            opacity: 0.94,
+            opacity: 0.72,
             transform: [
               { rotate: spinCW },
-              { scaleX: 0.96 },
-              { scaleY: 1.04 },
-              { scale: ribbonScale },
+              { scaleX: 0.972 },
+              { scaleY: 1.028 },
+              { scale: sphereScale },
             ],
           },
         ]}
@@ -351,39 +558,10 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
           style={[
             styles.circle,
             {
-              width: midRing,
-              height: midRing,
-              borderRadius: midRing / 2,
-              borderWidth: stroke,
-              borderColor: palette.primary,
-            },
-          ]}
-        />
-      </Animated.View>
-
-      {/* Bright inner core shimmer ring */}
-      <Animated.View
-        style={[
-          styles.motionLayer,
-          {
-            opacity: 0.65,
-            transform: [
-              { rotate: spinFastCW },
-              { scaleX: 1.028 },
-              { scaleY: 0.972 },
-              { scale: ribbonScale },
-            ],
-          },
-        ]}
-      >
-        <View
-          style={[
-            styles.circle,
-            {
-              width: innerRing,
-              height: innerRing,
-              borderRadius: innerRing / 2,
-              borderWidth: Math.max(1, stroke * 0.55),
+              width: orbitalInner,
+              height: orbitalInner,
+              borderRadius: orbitalInner / 2,
+              borderWidth: Math.max(1, stroke * 0.65),
               borderColor: palette.highlight,
             },
           ]}
@@ -403,14 +581,23 @@ export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura({
     >
       {exitingPalette ? (
         <Animated.View style={[styles.motionLayer, { opacity: exitingOpacity }]}>
-          {renderPaletteRings(exitingPalette)}
+          {renderSculptedAura(exitingPalette)}
         </Animated.View>
       ) : null}
       <Animated.View style={[styles.motionLayer, { opacity: fadeProgress }]}>
-        {renderPaletteRings(activePalette)}
+        {renderSculptedAura(activePalette)}
       </Animated.View>
     </Animated.View>
   );
+});
+
+export const AgentAudioVisualizerAura = memo(function AgentAudioVisualizerAura(
+  props: AgentAudioVisualizerAuraProps,
+) {
+  if (NativeSolarAuraView) {
+    return <NativeSolarAuraWrapper {...props} />;
+  }
+  return <FallbackSculptedAura {...props} />;
 });
 
 const styles = StyleSheet.create({
@@ -427,6 +614,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sphereShell: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   circle: {
     position: 'absolute',

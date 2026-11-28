@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  BackHandler,
   Easing,
   Keyboard,
   KeyboardAvoidingView,
@@ -10,31 +11,32 @@ import {
   Text,
   TextInput,
   useWindowDimensions,
+  Vibration,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AgentAudioVisualizerAura } from '../../../components/AgentAudioVisualizerAura';
 import { AuraConnectionStatus } from '../../../components/auraTheme';
+import { ChevronLeftIcon, SlidersIcon } from '../../../components/MonoIcons';
+import { MonoPressable } from '../../../components/MonoUi';
+import { MONO, MOTION, RADIUS, TYPE } from '../../../theme/monoTheme';
+import { useActiveCallTranscript } from '../context/ActiveCallContext';
 import {
   AgentVisualizerState,
-  CallChatMessage,
   CallConnectionState,
-} from '../hooks/useLiveKitCall';
+} from '../hooks/useDirectVoiceSession';
+import { nativeIncomingCall } from '../lib/nativeIncomingCall';
 import { AgentChatTranscript } from './AgentChatTranscript';
 import {
-  CameraIcon,
   ChatIcon,
   HangupIcon,
   MicIcon,
-  ScreenShareIcon,
   SendIcon,
 } from './CallIcons';
 
 export interface AgentControlBarControls {
   leave?: boolean;
   microphone?: boolean;
-  screenShare?: boolean;
-  camera?: boolean;
   chat?: boolean;
 }
 
@@ -44,77 +46,104 @@ interface ActiveCallViewProps {
   status: CallConnectionState;
   agentState: AgentVisualizerState;
   connectionStatus?: AuraConnectionStatus;
-  audioLevel: number;
-  elapsedSeconds: number;
   isMuted: boolean;
-  isCameraOn?: boolean;
-  isScreenShareOn?: boolean;
   error: string | null;
-  messages: CallChatMessage[];
   controls?: AgentControlBarControls;
-  showPermissionIndicator?: boolean;
-  microphoneMissing?: boolean;
-  onOpenPermissions?: () => void;
+  screenFocused?: boolean;
+  onOpenSettings?: () => void;
   onStartCall?: () => void;
   onStartCallPressIn?: () => void;
   onSendMessage: (text: string) => Promise<void>;
   onToggleMute: () => void;
-  onToggleCamera?: () => void;
-  onToggleScreenShare?: () => void;
   onEndCall: () => void;
 }
 
 const DEFAULT_CONTROLS: Required<AgentControlBarControls> = {
   leave: true,
   microphone: true,
-  screenShare: false,
-  camera: false,
   chat: true,
 };
 
 /**
- * Pure GPU-animated Voice & Transcript Canvas:
- * - One persistent `AgentAudioVisualizerAura` smoothly scales and glides via
- *   native transforms (never unmounted or resized on state/chat transitions).
- * - Zero LayoutAnimation conflicts, zero freeze when ending a call with chat open.
+ * Isolated subscriber to ActiveCallTranscriptContext so streaming word deltas only
+ * re-render the transcript list when the drawer is actually open.
  */
-export function ActiveCallView({
+const LiveCallTranscript = memo(function LiveCallTranscript({
+  agentState,
+}: {
+  agentState: AgentVisualizerState;
+}) {
+  const messages = useActiveCallTranscript();
+  return <AgentChatTranscript messages={messages} agentState={agentState} />;
+});
+
+/**
+ * Minimalist Monochrome Aura Canvas:
+ * - Uncluttered pure-black idle canvas centered on the living Aura (no idle message button).
+ * - Tap Aura to talk; Hold Aura (460ms) with expanding concentric halo & sliders cue
+ *   to smoothly transition into Settings.
+ * - Active call Control Bar (Mic, Chat/Transcript, Hangup) appears smoothly while call is active.
+ */
+export const ActiveCallView = memo(function ActiveCallView({
   isSessionActive = true,
   isCallReady = true,
   status,
   agentState,
   connectionStatus = 'idle',
-  audioLevel,
   isMuted,
-  isCameraOn = false,
-  isScreenShareOn = false,
   error,
-  messages,
   controls = DEFAULT_CONTROLS,
-  showPermissionIndicator = false,
-  microphoneMissing = false,
-  onOpenPermissions,
+  screenFocused = true,
+  onOpenSettings,
   onStartCall,
   onStartCallPressIn,
   onSendMessage,
   onToggleMute,
-  onToggleCamera,
-  onToggleScreenShare,
   onEndCall,
 }: ActiveCallViewProps) {
   const { height: windowHeight } = useWindowDimensions();
   const [chatOpen, setChatOpen] = useState(false);
+  const [transcriptMounted, setTranscriptMounted] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
-  const showControls = isSessionActive && isCallReady;
+  const showControls = isSessionActive;
   const showTranscript = showControls && chatOpen;
 
-  // All 3 transitions run strictly on the native GPU driver (60fps, zero JS lockups)
-  const promptAnim = useRef(new Animated.Value(isSessionActive ? 0 : 1)).current;
+  // Native GPU animations
   const dockAnim = useRef(new Animated.Value(showControls ? 1 : 0)).current;
   const chatAnim = useRef(new Animated.Value(showTranscript ? 1 : 0)).current;
+  const holdAnim = useRef(new Animated.Value(0)).current;
+  const stageOpacity = useRef(new Animated.Value(1)).current;
+
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdTriggeredRef = useRef(false);
+
+  const clearHoldTimer = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => clearHoldTimer();
+  }, [clearHoldTimer]);
+
+  // Smoothly restore Aura stage whenever user returns from Settings / Chat
+  useEffect(() => {
+    if (screenFocused) {
+      holdTriggeredRef.current = false;
+      holdAnim.setValue(0);
+      Animated.timing(stageOpacity, {
+        toValue: 1,
+        duration: MOTION.normal,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [holdAnim, screenFocused, stageOpacity]);
 
   useEffect(() => {
     if (!showControls && chatOpen) {
@@ -125,27 +154,28 @@ export function ActiveCallView({
   }, [chatOpen, showControls]);
 
   useEffect(() => {
+    if (showTranscript) {
+      setTranscriptMounted(true);
+    }
     Animated.parallel([
-      Animated.timing(promptAnim, {
-        toValue: isSessionActive ? 0 : 1,
-        duration: isSessionActive ? 190 : 280,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
       Animated.timing(dockAnim, {
         toValue: showControls ? 1 : 0,
-        duration: showControls ? 280 : 220,
+        duration: MOTION.normal,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(chatAnim, {
         toValue: showTranscript ? 1 : 0,
-        duration: showTranscript ? 280 : 240,
+        duration: MOTION.normal,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
-    ]).start();
-  }, [chatAnim, dockAnim, isSessionActive, promptAnim, showControls, showTranscript]);
+    ]).start(({ finished }) => {
+      if (finished && !showTranscript) {
+        setTranscriptMounted(false);
+      }
+    });
+  }, [chatAnim, dockAnim, showControls, showTranscript]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -161,7 +191,10 @@ export function ActiveCallView({
     };
   }, []);
 
-  const activeControls = { ...DEFAULT_CONTROLS, ...controls };
+  const activeControls = useMemo(
+    () => ({ ...DEFAULT_CONTROLS, ...controls }),
+    [controls],
+  );
   const resolvedState: AgentVisualizerState = !isSessionActive
     ? 'idle'
     : !isCallReady || status === 'connecting'
@@ -180,6 +213,84 @@ export function ActiveCallView({
             : 'connected';
 
   const isConnected = status === 'connected' || status === 'agent_speaking';
+
+  const handleAuraPressIn = useCallback(() => {
+    if (isSessionActive) return;
+    holdTriggeredRef.current = false;
+    onStartCallPressIn?.();
+
+    if (!onOpenSettings) return;
+
+    Animated.timing(holdAnim, {
+      toValue: 1,
+      duration: MOTION.holdToSettingsMs,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+
+    clearHoldTimer();
+    holdTimerRef.current = setTimeout(() => {
+      holdTriggeredRef.current = true;
+      Vibration.vibrate(14);
+      Animated.timing(stageOpacity, {
+        toValue: 0,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(() => {
+        onOpenSettings();
+      });
+    }, MOTION.holdToSettingsMs);
+  }, [clearHoldTimer, holdAnim, isSessionActive, onOpenSettings, onStartCallPressIn, stageOpacity]);
+
+  const handleAuraPressOut = useCallback(() => {
+    clearHoldTimer();
+    if (!holdTriggeredRef.current) {
+      Animated.spring(holdAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        ...MOTION.springSnappy,
+      }).start();
+    }
+  }, [clearHoldTimer, holdAnim]);
+
+  const handleAuraPress = useCallback(() => {
+    if (holdTriggeredRef.current) {
+      holdTriggeredRef.current = false;
+      return;
+    }
+    if (!isSessionActive) {
+      onStartCall?.();
+    } else if (!isCallReady) {
+      Keyboard.dismiss();
+      setChatOpen(false);
+      setDraft('');
+      onEndCall();
+    }
+  }, [isCallReady, isSessionActive, onEndCall, onStartCall]);
+
+  const handleMinimizeToBackground = useCallback(() => {
+    Keyboard.dismiss();
+    if (Platform.OS === 'android') {
+      nativeIncomingCall.moveToBackground();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !isSessionActive || !screenFocused) {
+      return;
+    }
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (chatOpen) {
+        Keyboard.dismiss();
+        setChatOpen(false);
+        return true;
+      }
+      nativeIncomingCall.moveToBackground();
+      return true;
+    });
+    return () => sub.remove();
+  }, [chatOpen, isSessionActive, screenFocused]);
 
   const handleToggleChat = useCallback(() => {
     setChatOpen((prev) => {
@@ -208,267 +319,268 @@ export function ActiveCallView({
   }, [draft, onSendMessage, sending]);
 
   const canSend = Boolean(draft.trim()) && !sending && isConnected;
-
-  // Distance Aura smoothly glides upward when transcript opens
   const raisedTranslateY = -Math.round(Math.max(210, windowHeight * 0.36));
 
-  const auraTranslateY = chatAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, raisedTranslateY],
-  });
-
-  const auraScale = chatAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0.3],
-  });
-
-  const transcriptTranslateY = chatAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [20, 0],
-  });
-
-  const promptTranslateY = promptAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [8, 0],
-  });
-
-  const dockTranslateY = dockAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [28, 0],
-  });
+  const {
+    auraTranslateY,
+    auraChatScale,
+    auraHoldScale,
+    holdRingScale,
+    holdRingOpacity,
+    holdIconScale,
+    holdIconOpacity,
+    transcriptTranslateY,
+    dockTranslateY,
+  } = useMemo(
+    () => ({
+      auraTranslateY: chatAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, raisedTranslateY],
+      }),
+      auraChatScale: chatAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0.3],
+      }),
+      auraHoldScale: holdAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0.91],
+      }),
+      holdRingScale: holdAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.9, 1.16],
+      }),
+      holdRingOpacity: holdAnim.interpolate({
+        inputRange: [0, 0.18, 1],
+        outputRange: [0, 0.22, 0.88],
+      }),
+      holdIconScale: holdAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.76, 1.02],
+      }),
+      holdIconOpacity: holdAnim.interpolate({
+        inputRange: [0, 0.22, 1],
+        outputRange: [0, 0.16, 1],
+      }),
+      transcriptTranslateY: chatAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [18, 0],
+      }),
+      dockTranslateY: dockAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [24, 0],
+      }),
+    }),
+    [chatAnim, dockAnim, holdAnim, raisedTranslateY],
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView
-        style={[
-          styles.flex,
-          Platform.OS === 'android' &&
-            androidKeyboardHeight > 0 && {
-              paddingBottom: androidKeyboardHeight + 12,
-            },
-        ]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
-      >
-        {/* Permission indicator — strictly hidden when all required permissions are granted */}
-        {!isSessionActive && showPermissionIndicator && onOpenPermissions ? (
-          <View style={styles.idleTopBar} pointerEvents="box-none">
-            <Pressable
-              style={({ pressed }) => [
-                styles.permissionsPill,
-                styles.permissionsPillAlert,
-                pressed && styles.permissionsPillPressed,
-              ]}
-              onPress={onOpenPermissions}
-              hitSlop={8}
-              accessibilityLabel="Required permission missing. Open permission settings."
-            >
-              <View style={styles.alertDot} />
-              <Text style={styles.permissionsPillText}>Permissions</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {/* Persistent Centered Aura Layer — smoothly scales & glides via pure GPU transforms */}
-        <View style={styles.auraBackdrop} pointerEvents="box-none">
-          <Animated.View
-            style={[
-              styles.auraAnimatedBox,
-              {
-                transform: [{ translateY: auraTranslateY }, { scale: auraScale }],
-              },
-            ]}
-          >
-            <Pressable
-              onPressIn={!isSessionActive ? onStartCallPressIn : undefined}
-              onPress={!isSessionActive ? onStartCall : !isCallReady ? handleEndPress : undefined}
-              disabled={showControls}
-              style={({ pressed }) => [
-                styles.auraTouch,
-                !showControls && pressed && styles.auraPressed,
-              ]}
-              accessibilityLabel={
-                !isSessionActive
-                  ? 'Tap Aura to talk'
-                  : !isCallReady
-                    ? 'Connecting to Kallie, tap to cancel'
-                    : 'Kallie Aura visualizer'
-              }
-            >
-              <AgentAudioVisualizerAura
-                size="xl"
-                connectionStatus={effectiveConnectionStatus}
-                state={resolvedState}
-                audioLevel={isSessionActive ? audioLevel : 0.14}
-                colorShift={0.3}
-                themeMode="dark"
-              />
-            </Pressable>
-          </Animated.View>
-
-          <Animated.View
-            style={[
-              styles.promptWrap,
-              {
-                opacity: promptAnim,
-                transform: [{ translateY: promptTranslateY }],
-              },
-            ]}
-            pointerEvents="none"
-          >
-            <Text style={styles.promptText}>
-              {microphoneMissing
-                ? 'Tap Aura to allow microphone & talk.'
-                : 'Tap Aura to talk.'}
-            </Text>
-          </Animated.View>
-
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        </View>
-
-        {/* Borderless Real-Time Chat Transcript Layer — mounted lazily when call controls & chat/messages are active */}
-        {showControls && (chatOpen || messages.length > 0) ? (
-          <Animated.View
-            style={[
-              styles.transcriptLayer,
-              {
-                opacity: chatAnim,
-                transform: [{ translateY: transcriptTranslateY }],
-              },
-            ]}
-            pointerEvents={showTranscript ? 'auto' : 'none'}
-          >
-            <AgentChatTranscript messages={messages} agentState={resolvedState} />
-          </Animated.View>
-        ) : null}
-
-        {/* Smoothly animated LiveKit Control Bar */}
-        <Animated.View
+      <Animated.View style={[styles.flexRoot, { opacity: stageOpacity }]}>
+        <KeyboardAvoidingView
           style={[
-            styles.controlDock,
-            {
-              opacity: dockAnim,
-              transform: [{ translateY: dockTranslateY }],
-            },
+            styles.flex,
+            Platform.OS === 'android' &&
+              androidKeyboardHeight > 0 && {
+                paddingBottom: androidKeyboardHeight + 12,
+              },
           ]}
-          pointerEvents={showControls ? 'auto' : 'none'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
         >
-          {showTranscript && activeControls.chat ? (
-            <View style={styles.composerRow}>
-              <TextInput
-                style={styles.composerInput}
-                value={draft}
-                onChangeText={setDraft}
-                placeholder="Type something..."
-                placeholderTextColor="#71717A"
-                returnKeyType="send"
-                onSubmitEditing={handleSend}
-                editable={!sending}
-              />
-              <Pressable
-                style={({ pressed }) => [
-                  styles.sendBtn,
-                  canSend && styles.sendBtnReady,
-                  pressed && canSend && styles.sendBtnPressed,
-                ]}
-                onPress={handleSend}
-                disabled={!canSend}
-                accessibilityLabel="Send message"
+          {/* Top-left Telegram-style Back / Minimize button during active call */}
+          {Platform.OS === 'android' && isSessionActive ? (
+            <View style={styles.topBackWrap} pointerEvents="box-none">
+              <MonoPressable
+                style={styles.topBackBtn}
+                scaleTo={0.92}
+                onPress={handleMinimizeToBackground}
+                accessibilityLabel="Minimize call to background"
               >
-                <SendIcon color={canSend ? '#000000' : '#71717A'} />
-              </Pressable>
+                <ChevronLeftIcon color={MONO.white} size={20} />
+              </MonoPressable>
             </View>
           ) : null}
 
-          <View style={styles.controlActions}>
-            <View style={styles.leftActions}>
-              {activeControls.microphone ? (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.actionBtn,
-                    isMuted && styles.actionBtnDanger,
-                    pressed && styles.actionBtnPressed,
-                  ]}
-                  onPress={onToggleMute}
-                  accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-                >
-                  <MicIcon color={isMuted ? '#F87171' : '#FAFAFA'} muted={isMuted} />
-                </Pressable>
-              ) : null}
-
-              {activeControls.camera && onToggleCamera ? (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.actionBtn,
-                    isCameraOn && styles.actionBtnActive,
-                    pressed && styles.actionBtnPressed,
-                  ]}
-                  onPress={onToggleCamera}
-                  accessibilityLabel={isCameraOn ? 'Turn off camera' : 'Turn on camera'}
-                >
-                  <CameraIcon
-                    color={isCameraOn ? '#1FD5F9' : '#FAFAFA'}
-                    enabled={isCameraOn}
-                  />
-                </Pressable>
-              ) : null}
-
-              {activeControls.screenShare && onToggleScreenShare ? (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.actionBtn,
-                    isScreenShareOn && styles.actionBtnActive,
-                    pressed && styles.actionBtnPressed,
-                  ]}
-                  onPress={onToggleScreenShare}
-                  accessibilityLabel={
-                    isScreenShareOn ? 'Stop screen share' : 'Share screen'
-                  }
-                >
-                  <ScreenShareIcon
-                    color={isScreenShareOn ? '#1FD5F9' : '#FAFAFA'}
-                  />
-                </Pressable>
-              ) : null}
-
-              {activeControls.chat ? (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.actionBtn,
-                    chatOpen && styles.actionBtnActive,
-                    pressed && styles.actionBtnPressed,
-                  ]}
-                  onPress={handleToggleChat}
-                  accessibilityLabel={chatOpen ? 'Hide transcript' : 'Show transcript'}
-                >
-                  <ChatIcon color={chatOpen ? '#1FD5F9' : '#FAFAFA'} />
-                </Pressable>
-              ) : null}
-            </View>
-
-            {activeControls.leave ? (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.endBtn,
-                  pressed && styles.endBtnPressed,
+          {/* Persistent Centered Aura Layer */}
+          <View style={styles.auraBackdrop} pointerEvents="box-none">
+            <Animated.View
+              style={[
+                styles.auraAnimatedBox,
+                {
+                  transform: [
+                    { translateY: auraTranslateY },
+                    { scale: auraChatScale },
+                  ],
+                },
+              ]}
+            >
+              {/* Expanding monochrome hold-to-settings halo */}
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.holdHaloRing,
+                  {
+                    opacity: holdRingOpacity,
+                    transform: [{ scale: holdRingScale }],
+                  },
                 ]}
-                onPress={handleEndPress}
-                accessibilityLabel="Leave call"
+              />
+
+              <Pressable
+                onPressIn={handleAuraPressIn}
+                onPressOut={handleAuraPressOut}
+                onPress={handleAuraPress}
+                disabled={isSessionActive && isCallReady}
+                style={styles.auraTouch}
+                accessibilityLabel={
+                  !isSessionActive
+                    ? 'Tap Aura to talk, or hold to open Settings'
+                    : !isCallReady
+                      ? 'Connecting, tap to cancel'
+                      : 'Kallie Aura'
+                }
               >
-                <HangupIcon color="#F87171" />
+                <Animated.View style={{ transform: [{ scale: auraHoldScale }] }}>
+                  <AgentAudioVisualizerAura
+                    size="xl"
+                    connectionStatus={effectiveConnectionStatus}
+                    state={resolvedState}
+                    liveAudio={isSessionActive}
+                    audioLevel={0.14}
+                    colorShift={0.3}
+                  />
+                </Animated.View>
+
+                {/* Centered Sliders cue materializes while holding Aura */}
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.holdCenterCue,
+                    {
+                      opacity: holdIconOpacity,
+                      transform: [{ scale: holdIconScale }],
+                    },
+                  ]}
+                >
+                  <SlidersIcon color={MONO.white} size={22} />
+                </Animated.View>
               </Pressable>
+            </Animated.View>
+
+            {error ? (
+              <View style={styles.errorPill}>
+                <Text style={styles.errorText} numberOfLines={2}>
+                  {error}
+                </Text>
+              </View>
             ) : null}
           </View>
-        </Animated.View>
-      </KeyboardAvoidingView>
+
+          {/* Real-Time Chat Transcript Layer (unmounted when hidden to avoid background FlatList churn) */}
+          {showControls && transcriptMounted ? (
+            <Animated.View
+              style={[
+                styles.transcriptLayer,
+                {
+                  opacity: chatAnim,
+                  transform: [{ translateY: transcriptTranslateY }],
+                },
+              ]}
+              pointerEvents={showTranscript ? 'auto' : 'none'}
+            >
+              <LiveCallTranscript agentState={resolvedState} />
+            </Animated.View>
+          ) : null}
+
+          {/* Pure Monochrome Active Call Control Bar */}
+          <Animated.View
+            style={[
+              styles.controlDock,
+              {
+                opacity: dockAnim,
+                transform: [{ translateY: dockTranslateY }],
+              },
+            ]}
+            pointerEvents={showControls ? 'auto' : 'none'}
+          >
+            {showTranscript && activeControls.chat ? (
+              <View style={styles.composerRow}>
+                <TextInput
+                  style={styles.composerInput}
+                  value={draft}
+                  onChangeText={setDraft}
+                  placeholder="Message"
+                  placeholderTextColor={MONO.textMuted}
+                  returnKeyType="send"
+                  onSubmitEditing={handleSend}
+                  editable={!sending}
+                />
+                <MonoPressable
+                  style={[styles.sendBtn, canSend && styles.sendBtnReady]}
+                  scaleTo={0.92}
+                  onPress={handleSend}
+                  disabled={!canSend}
+                  accessibilityLabel="Send message"
+                >
+                  <SendIcon color={canSend ? MONO.black : MONO.textMuted} size={18} />
+                </MonoPressable>
+              </View>
+            ) : null}
+
+            <View style={styles.controlActions}>
+              <View style={styles.leftActions}>
+                {activeControls.microphone ? (
+                  <MonoPressable
+                    style={[styles.actionBtn, isMuted && styles.actionBtnActive]}
+                    scaleTo={0.92}
+                    onPress={onToggleMute}
+                    accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                  >
+                    <MicIcon
+                      color={isMuted ? MONO.black : MONO.white}
+                      size={19}
+                      muted={isMuted}
+                    />
+                  </MonoPressable>
+                ) : null}
+
+                {activeControls.chat ? (
+                  <MonoPressable
+                    style={[styles.actionBtn, chatOpen && styles.actionBtnActive]}
+                    scaleTo={0.92}
+                    onPress={handleToggleChat}
+                    accessibilityLabel={chatOpen ? 'Hide transcript' : 'Show transcript'}
+                  >
+                    <ChatIcon color={chatOpen ? MONO.black : MONO.white} size={19} />
+                  </MonoPressable>
+                ) : null}
+              </View>
+
+              {activeControls.leave ? (
+                <MonoPressable
+                  style={styles.endBtn}
+                  scaleTo={0.92}
+                  onPress={handleEndPress}
+                  accessibilityLabel="End call"
+                >
+                  <HangupIcon color={MONO.black} size={20} />
+                </MonoPressable>
+              ) : null}
+            </View>
+          </Animated.View>
+        </KeyboardAvoidingView>
+      </Animated.View>
     </SafeAreaView>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: MONO.bg,
+  },
+  flexRoot: {
+    flex: 1,
   },
   flex: {
     flex: 1,
@@ -477,42 +589,21 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     justifyContent: 'flex-end',
   },
-  idleTopBar: {
+  topBackWrap: {
     position: 'absolute',
     top: 12,
-    right: 20,
+    left: 20,
     zIndex: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
   },
-  permissionsPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    backgroundColor: '#111111',
+  topBackBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: MONO.surface,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    borderRadius: 999,
-    paddingHorizontal: 13,
-    paddingVertical: 7,
-  },
-  permissionsPillAlert: {
-    borderColor: 'rgba(245, 158, 11, 0.42)',
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-  },
-  permissionsPillPressed: {
-    backgroundColor: '#18181B',
-  },
-  alertDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#FBBF24',
-  },
-  permissionsPillText: {
-    color: '#D4D4D8',
-    fontSize: 12,
-    fontWeight: '500',
+    borderColor: MONO.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   auraBackdrop: {
     position: 'absolute',
@@ -527,33 +618,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  holdHaloRing: {
+    position: 'absolute',
+    width: 248,
+    height: 248,
+    borderRadius: 124,
+    borderWidth: 1.25,
+    borderColor: MONO.white,
+  },
   auraTouch: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  auraPressed: {
-    transform: [{ scale: 0.96 }],
-  },
-  promptWrap: {
+  holdCenterCue: {
     position: 'absolute',
-    top: '50%',
-    marginTop: 158,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    borderWidth: 1,
+    borderColor: MONO.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  promptText: {
-    color: '#71717A',
-    fontSize: 14,
-    fontWeight: '400',
-    letterSpacing: -0.1,
-    textAlign: 'center',
+  errorPill: {
+    position: 'absolute',
+    bottom: 108,
+    maxWidth: 300,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: RADIUS.pill,
+    backgroundColor: MONO.surfaceElevated,
+    borderWidth: 1,
+    borderColor: MONO.borderStrong,
   },
   errorText: {
-    position: 'absolute',
-    bottom: 112,
-    color: '#F87171',
-    fontSize: 13,
+    ...TYPE.caption,
+    color: MONO.textPrimary,
     textAlign: 'center',
-    paddingHorizontal: 24,
-    lineHeight: 19,
   },
   transcriptLayer: {
     flex: 1,
@@ -563,42 +665,39 @@ const styles = StyleSheet.create({
   },
   controlDock: {
     width: '100%',
-    backgroundColor: '#0A0A0D',
+    backgroundColor: MONO.surface,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    borderRadius: 31,
-    padding: 10,
+    borderColor: MONO.border,
+    borderRadius: 30,
+    padding: 9,
   },
   composerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingBottom: 10,
-    marginBottom: 10,
-    paddingHorizontal: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    paddingBottom: 9,
+    marginBottom: 9,
+    paddingHorizontal: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: MONO.border,
   },
   composerInput: {
+    ...TYPE.body,
     flex: 1,
-    color: '#FAFAFA',
-    fontSize: 15,
+    color: MONO.textPrimary,
     paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
   },
   sendBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#1C1C20',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: MONO.surfacePressed,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendBtnReady: {
-    backgroundColor: '#1FD5F9',
-  },
-  sendBtnPressed: {
-    backgroundColor: '#67E8F9',
+    backgroundColor: MONO.white,
   },
   controlActions: {
     flexDirection: 'row',
@@ -611,37 +710,25 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   actionBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#18181B',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: MONO.surfaceElevated,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
+    borderColor: MONO.border,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  actionBtnPressed: {
-    opacity: 0.8,
-  },
-  actionBtnDanger: {
-    backgroundColor: 'rgba(239, 68, 68, 0.16)',
-    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   actionBtnActive: {
-    backgroundColor: 'rgba(31, 213, 249, 0.16)',
-    borderColor: 'rgba(31, 213, 249, 0.42)',
+    backgroundColor: MONO.white,
+    borderColor: MONO.white,
   },
   endBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: 'rgba(239, 68, 68, 0.16)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.28)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: MONO.white,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  endBtnPressed: {
-    backgroundColor: 'rgba(239, 68, 68, 0.32)',
   },
 });

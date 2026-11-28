@@ -52,6 +52,8 @@ export function usePermissions(options?: { syncOnResume?: boolean }) {
         !SUPPORTS_FULL_SCREEN_INTENT_TOGGLE ||
         snapshot.statuses.fullScreenIntent === 'granted',
       camera: snapshot.statuses.camera === 'granted',
+      accessibility: snapshot.statuses.accessibility === 'granted',
+      notificationAccess: snapshot.statuses.notificationAccess === 'granted',
     };
 
     const requiredDescriptors = PERMISSION_DESCRIPTORS.filter(

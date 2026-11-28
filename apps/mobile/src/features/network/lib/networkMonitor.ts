@@ -12,7 +12,8 @@ type NetworkListener = (snapshot: NetworkQualitySnapshot) => void;
 
 const PROBE_URL = 'https://clients3.google.com/generate_204';
 const PROBE_TIMEOUT_MS = 2400;
-const HEALTHY_INTERVAL_MS = 2000;
+const HEALTHY_INTERVAL_MS = 4000;
+const WEAK_INTERVAL_MS = 2000;
 const OFFLINE_INTERVAL_MS = 1500;
 const WEAK_RTT_THRESHOLD_MS = 750;
 const RECOVER_HEALTHY_RTT_MS = 600;
@@ -74,14 +75,11 @@ class NetworkMonitor {
 
   private emit(next: NetworkQualitySnapshot): void {
     const qualityChanged = next.quality !== this.snapshot.quality;
-    const rttChanged =
-      next.rttMs !== this.snapshot.rttMs &&
-      (next.rttMs === null ||
-        this.snapshot.rttMs === null ||
-        Math.abs(next.rttMs - this.snapshot.rttMs) >= 120);
-
     this.snapshot = next;
-    if (!qualityChanged && !rttChanged) {
+    // Only notify UI subscribers when connection quality actually transitions
+    // (connected <-> weak <-> disconnected). Prevents idle RTT jitter from
+    // triggering full-tree React re-renders in ActiveCallProvider.
+    if (!qualityChanged) {
       return;
     }
 
@@ -202,7 +200,11 @@ class NetworkMonitor {
   private scheduleNext(): void {
     this.clearTimer();
     const delayMs =
-      this.snapshot.quality === 'disconnected' ? OFFLINE_INTERVAL_MS : HEALTHY_INTERVAL_MS;
+      this.snapshot.quality === 'disconnected'
+        ? OFFLINE_INTERVAL_MS
+        : this.snapshot.quality === 'weak'
+          ? WEAK_INTERVAL_MS
+          : HEALTHY_INTERVAL_MS;
     this.timer = setTimeout(() => {
       if (this.started && this.isForeground) {
         void this.probeNow(false);

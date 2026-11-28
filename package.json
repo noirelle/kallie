@@ -1,13 +1,12 @@
 {
   "name": "kallie",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Kallie — Scheduled AI Voice Calling App (Expo + NestJS + LiveKit + Supabase)",
+  "description": "Kallie — 100% Serverless Local-First AI Companion for Android (Expo + SQLite + Direct Gemini Live / OpenAI Realtime + Static Next.js Landing Page)",
   "scripts": {
-    "install:all": "npm --prefix services/api install && npm --prefix services/agent install && npm --prefix apps/web install && npm --prefix apps/mobile install --legacy-peer-deps",
-    "dev:api": "npm --prefix services/api run start:dev",
-    "dev:agent": "npm --prefix services/agent run dev",
+    "install:all": "npm --prefix apps/web install && npm --prefix apps/bridge install && npm --prefix apps/mobile install --legacy-peer-deps",
     "dev:web": "npm --prefix apps/web run dev",
+    "dev:bridge": "npm --prefix apps/bridge run dev",
     "dev:mobile": "npm --prefix apps/mobile run start",
     "mobile:doctor": "npm --prefix apps/mobile run android:doctor",
     "mobile:build": "npm --prefix apps/mobile run android:build",
@@ -16,14 +15,10 @@
     "mobile:logs": "npm --prefix apps/mobile run android:logs",
     "mobile:mirror": "npm --prefix apps/mobile run android:mirror",
     "mobile:release-local": "npm --prefix apps/mobile run android:release-local",
-    "build:api": "npm --prefix services/api run build",
-    "build:agent": "npm --prefix services/agent run build",
     "build:web": "npm --prefix apps/web run build",
+    "build:bridge": "npm --prefix apps/bridge run build",
+    "test:bridge": "npm --prefix apps/bridge test",
     "typecheck:mobile": "npm --prefix apps/mobile run typecheck",
-    "test:infra": "node --test infra/test/*.test.mjs",
-    "test:api": "npm --prefix services/api test",
-    "test:agent": "npm --prefix services/agent test",
-    "test:all": "npm run test:infra && npm run test:api && npm run test:agent",
-    "typecheck:all": "npm run build:api && npm run build:agent && npm run typecheck:mobile"
+    "typecheck:all": "npm run build:web && npm run test:bridge && npm run typecheck:mobile"
   }
 }

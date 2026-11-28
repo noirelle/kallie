@@ -188,14 +188,14 @@ async function cmdDoctor() {
 }
 
 async function cmdBuild() {
-  const env = buildEnv({ EXPO_ENABLE_ANDROID_FCM: 'true' });
+  const env = buildEnv();
   probe('adb', ['reverse', 'tcp:8081', 'tcp:8081'], env);
   const code = await runCommand('npx', ['expo', 'run:android'], { env });
   process.exit(code);
 }
 
 async function cmdDev() {
-  const env = buildEnv({ EXPO_ENABLE_ANDROID_FCM: 'true' });
+  const env = buildEnv();
   probe('adb', ['reverse', 'tcp:8081', 'tcp:8081'], env);
   probe('adb', ['shell', 'monkey', '-p', 'com.kallie.app', '-c', 'android.intent.category.LAUNCHER', '1'], env);
   const code = await runCommand('npx', ['expo', 'start', '--localhost'], { env });
@@ -262,7 +262,7 @@ async function cmdMirror() {
 }
 
 async function cmdReleaseLocal() {
-  const env = buildEnv({ EXPO_ENABLE_ANDROID_FCM: 'true' });
+  const env = buildEnv();
   console.log('1/3 Running expo prebuild for Android...');
   let code = await runCommand('npx', ['expo', 'prebuild', '--platform', 'android', '--clean'], {
     env,

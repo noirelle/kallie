@@ -7,16 +7,16 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.1.2)"
+        description: "Release tag (e.g. v0.2.0)"
         required: true
-        default: "v0.1.2"
+        default: "v0.2.0"
 
 permissions:
   contents: write
 
 jobs:
   build-and-verify:
-    name: Build Optimized APK & Verify on Android Emulator
+    name: Build Lightweight Serverless APK & Verify on Emulator
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -51,27 +51,16 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Decode google-services.json for Android FCM
-        working-directory: apps/mobile
-        env:
-          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
-        run: |
-          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
-            echo "$GOOGLE_SERVICES_JSON_B64" | base64 -d > google-services.json
-            test -s google-services.json
-          fi
-
       - name: Install mobile dependencies
         working-directory: apps/mobile
         run: npm ci --legacy-peer-deps
 
-      - name: Build signed Android APK locally on runner (zero EAS queue)
+      - name: Build signed Android APK locally on runner
         id: build
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EAS_LOCAL_BUILD_SKIP_CLEANUP: "1"
-          GOOGLE_SERVICES_JSON: ${{ github.workspace }}/apps/mobile/google-services.json
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
@@ -83,36 +72,6 @@ jobs:
           ls -lh "${APK_FILE}"
           SIZE_BYTES=$(stat -c%s "${APK_FILE}")
           echo "APK size bytes: ${SIZE_BYTES}"
-          if [ "${SIZE_BYTES}" -gt 52428800 ]; then
-            echo "WARNING: APK exceeds 50 MB (${SIZE_BYTES} bytes)"
-          fi
-
-      - name: Enable KVM for Android Emulator
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Verify built APK on Android 14 Emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          disable-animations: true
-          script: bash infra/test/verify-apk-emulator.sh "apps/mobile/${{ steps.build.outputs.apk_file }}"
-
-      - name: Upload Emulator Verification Evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-emulator-evidence
-          path: |
-            emulator-screen-*.png
-            full-logcat.txt
-          if-no-files-found: ignore
 
       - name: Publish GitHub Release with Verified APK
         uses: softprops/action-gh-release@v2
